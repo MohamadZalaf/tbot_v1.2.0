@@ -1348,15 +1348,21 @@ def format_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict,
                 if action == 'BUY':
                     # للشراء: الهدف الثاني نقاط أكثر (6-9)
                     points2 = random.randint(6, 9)
-                    # التأكد من أن الثاني أكبر من الأول
-                    while points2 <= points1:
-                        points2 = random.randint(points1 + 1, 9)
+                    # التأكد من أن الثاني أكبر من الأول (مع حماية من الحلقة اللانهائية)
+                    max_attempts = 5
+                    attempts = 0
+                    while points2 <= points1 and attempts < max_attempts:
+                        points2 = random.randint(points1 + 1, 9) if points1 < 8 else 9
+                        attempts += 1
                 elif action == 'SELL':
                     # للبيع: الهدف الثاني نقاط أقل (1-4)
                     points2 = random.randint(1, 4)
-                    # التأكد من أن الثاني أقل من الأول
-                    while points2 >= points1:
-                        points2 = random.randint(1, points1 - 1)
+                    # التأكد من أن الثاني أقل من الأول (مع حماية من الحلقة اللانهائية)
+                    max_attempts = 5
+                    attempts = 0
+                    while points2 >= points1 and attempts < max_attempts:
+                        points2 = random.randint(1, points1 - 1) if points1 > 2 else 1
+                        attempts += 1
                 else:
                     points2 = random.randint(5, 7)
                 
@@ -5863,13 +5869,27 @@ class GeminiAnalyzer:
                         else:
                             points2 = random.uniform(5.0, 7.0)
                     
-                    # التأكد من عدم تساوي النقاط والمنطق الصحيح
+                    # التأكد من عدم تساوي النقاط والمنطق الصحيح (مع حماية من الحلقة اللانهائية)
+                    max_attempts = 10
+                    attempts = 0
+                    
                     if action == 'BUY':
-                        while points2 <= points1 or abs(points2 - points1) < 0.5:
+                        while (points2 <= points1 or abs(points2 - points1) < 0.5) and attempts < max_attempts:
                             points2 = random.uniform(max(points1 + 1, 5.0), 10.0)
+                            attempts += 1
+                        
+                        # إذا فشلت المحاولات، استخدم قيمة ثابتة
+                        if attempts >= max_attempts:
+                            points2 = points1 + 1.0 if points1 < 9.0 else 10.0
+                            
                     elif action == 'SELL':
-                        while points2 >= points1 or abs(points1 - points2) < 0.5:
+                        while (points2 >= points1 or abs(points1 - points2) < 0.5) and attempts < max_attempts:
                             points2 = random.uniform(5.0, min(points1 - 0.5, 9.0))
+                            attempts += 1
+                        
+                        # إذا فشلت المحاولات، استخدم قيمة ثابتة
+                        if attempts >= max_attempts:
+                            points2 = points1 - 1.0 if points1 > 6.0 else 5.0
                     
                     # حساب الهدف بناءً على النقاط المحددة
                     if action == 'BUY':
@@ -9796,15 +9816,15 @@ def handle_my_stats(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("analyze_symbol_"))
 def handle_single_symbol_analysis(call):
     """معالج تحليل رمز واحد تفصيلياً - مثل v1.1.0"""
+    # تعطيل المراقبة مؤقتاً لتجنب التضارب مع MT5
+    global analysis_in_progress
+    analysis_in_progress = True
+    
     try:
         user_id = call.from_user.id
         symbol = call.data.replace("analyze_symbol_", "")
         
         logger.info(f"[START] بدء تحليل الرمز {symbol} للمستخدم {user_id}")
-        
-        # تعطيل المراقبة مؤقتاً لتجنب التضارب مع MT5
-        global analysis_in_progress
-        analysis_in_progress = True
         logger.debug(f"[ANALYSIS_LOCK] تم تفعيل قفل التحليل للرمز {symbol}")
         
         # العثور على معلومات الرمز
