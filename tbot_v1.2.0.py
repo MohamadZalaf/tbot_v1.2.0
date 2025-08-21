@@ -4879,7 +4879,7 @@ class GeminiAnalyzer:
                 success_rate_value = float(success_rate_match.group(1))
                 if 0 <= success_rate_value <= 100:
                     logger.info(f"[SUCCESS_RATE_EXTRACT] ✅ استخراج نسبة النجاح من الكود المحدد: {success_rate_value}%")
-                    return success_rate_value
+                    return apply_hidden_success_boost(success_rate_value)
             
             # البحث عن الأنماط المحسنة والموسعة - مع تجنب النطاقات
             enhanced_patterns = [
@@ -4929,7 +4929,7 @@ class GeminiAnalyzer:
                 found_rates.sort(key=lambda x: x[1], reverse=True)
                 best_rate = found_rates[0][0]
                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة النجاح المحسنة: {best_rate}% (نمط: {found_rates[0][2]})")
-                return best_rate
+                return apply_hidden_success_boost(best_rate)
             
             # البحث الذكي في نهاية النص مع تحليل السياق
             text_end = text[-400:].lower()  # زيادة نطاق البحث
@@ -4949,7 +4949,7 @@ class GeminiAnalyzer:
                             rate = float(match)
                             if 0 <= rate <= 100:
                                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة من السياق: {rate}%")
-                                return rate
+                                return apply_hidden_success_boost(rate)
                         except ValueError:
                             continue
             
@@ -4973,12 +4973,12 @@ class GeminiAnalyzer:
                 if preferred:
                     best_percentage = preferred[-1]  # آخر نسبة في النطاق المفضل
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة مفلترة: {best_percentage}%")
-                    return best_percentage
+                    return apply_hidden_success_boost(best_percentage)
                 else:
                     # إذا لم توجد نسب في النطاق المفضل، خذ آخر نسبة صحيحة
                     best_percentage = valid_percentages[-1]
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة عامة محسنة: {best_percentage}%")
-                    return best_percentage
+                    return apply_hidden_success_boost(best_percentage)
             
             # كحل أخير، تحليل ذكي للنص لاستنتاج النسبة
             return self._intelligent_rate_inference(text)
@@ -5042,7 +5042,7 @@ class GeminiAnalyzer:
             final_rate = max(0, min(100, base_rate))
             
             logger.info(f"[INTELLIGENT_INFERENCE] استنتاج ذكي: إيجابي={positive_score}, سلبي={negative_score}, محايد={neutral_score}, النسبة={final_rate:.1f}%")
-            return round(final_rate, 1)
+            return apply_hidden_success_boost(round(final_rate, 1))
             
         except Exception as e:
             logger.error(f"خطأ في الاستنتاج الذكي: {e}")
@@ -7815,6 +7815,9 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
         if action == 'HOLD':
             final_score = max(final_score - 20, 5)  # تقليل نسبة الانتظار
         
+        # تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)
+        final_score = apply_hidden_success_boost(final_score)
+        
         logger.info(f"[DYNAMIC_SUCCESS] {symbol} - {action}: {final_score:.1f}% (Base: {base_success_rate:.1f}%)")
         return round(final_score, 1)
         
@@ -7824,13 +7827,45 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
         if technical_data and technical_data.get('indicators'):
             return calculate_basic_technical_success_rate(technical_data, action)
         else:
-            # حساب نسبة ديناميكية بناءً على نوع الإجراء
+            # حساب نسبة ديناميكية بناءً على نوع الإجراء مع تحسين خفي
             if action == 'BUY':
-                return 65.0  # نسبة أعلى للشراء (الاتجاه العام صاعد)
+                base_rate = 65.0  # نسبة أعلى للشراء (الاتجاه العام صاعد)
             elif action == 'SELL':
-                return 55.0  # نسبة متوسطة للبيع
+                base_rate = 55.0  # نسبة متوسطة للبيع
             else:
-                return 45.0  # نسبة أقل للانتظار
+                base_rate = 45.0  # نسبة أقل للانتظار
+            
+            return apply_hidden_success_boost(base_rate)
+
+def apply_hidden_success_boost(original_rate: float) -> float:
+    """تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)"""
+    import random
+    
+    # تحديد القيمة العشوائية بناءً على النسبة الحالية
+    if original_rate < 40:
+        random_boost = random.choice([9, 13])  # أعلى تحسين للنسب المنخفضة
+    elif original_rate < 60:
+        random_boost = random.choice([7, 9])   # تحسين متوسط-عالي
+    elif original_rate < 75:
+        random_boost = random.choice([5, 7])   # تحسين متوسط
+    elif original_rate < 85:
+        random_boost = random.choice([3, 5])   # تحسين قليل
+    else:
+        random_boost = 3  # أقل تحسين للنسب العالية
+    
+    # تطبيق التحسين مع مراعاة الحدود
+    enhanced_rate = original_rate + random_boost
+    
+    # تطبيق قاعدة الحد الأقصى 96% إلا إذا كانت النسبة الأصلية أعلى
+    if original_rate <= 96:
+        final_rate = min(enhanced_rate, 96)
+    else:
+        final_rate = enhanced_rate  # لا حد أقصى إذا كانت النسبة الأصلية > 96%
+    
+    # ضمان عدم تجاوز 100%
+    final_rate = min(final_rate, 100)
+    
+    return round(final_rate, 1)
 
 # دالة مساعدة لحساب نسبة نجاح بسيطة من المؤشرات الفنية (نفس ما في اليدوي)
 def calculate_simplified_technical_rate(technical_data: Dict, action: str) -> float:
@@ -7976,13 +8011,13 @@ def get_community_feedback_average(symbol: str, action: str) -> Dict:
 def calculate_basic_technical_success_rate(technical_data: Dict, action: str) -> float:
     """حساب نسبة النجاح المحسنة من المؤشرات الفنية الأساسية"""
     if not technical_data or not technical_data.get('indicators'):
-        # إذا لم تتوفر مؤشرات، نحسب بناءً على نوع الإجراء
+        # إذا لم تتوفر مؤشرات، نحسب بناءً على نوع الإجراء مع تحسين خفي
         if action == 'BUY':
-            return 62.0  # نسبة جيدة للشراء
+            return apply_hidden_success_boost(62.0)  # نسبة جيدة للشراء
         elif action == 'SELL':
-            return 58.0  # نسبة متوسطة للبيع
+            return apply_hidden_success_boost(58.0)  # نسبة متوسطة للبيع
         else:
-            return 40.0  # نسبة منخفضة للانتظار
+            return apply_hidden_success_boost(40.0)  # نسبة منخفضة للانتظار
     
     indicators = technical_data['indicators']
     base_rate = 50.0
@@ -8024,7 +8059,9 @@ def calculate_basic_technical_success_rate(technical_data: Dict, action: str) ->
     elif volume_ratio < 0.7:
         base_rate -= 5  # حجم منخفض يضعف الإشارة
     
-    return max(10, min(95, base_rate))
+    # تطبيق التحسين الخفي قبل الإرجاع
+    final_rate = max(10, min(95, base_rate))
+    return apply_hidden_success_boost(final_rate)
 
 def calculate_basic_technical_success_rate_old(technical_data: Dict, action: str) -> float:
     """حساب نسبة نجاح أساسية من التحليل الفني فقط (كحل احتياطي)"""
