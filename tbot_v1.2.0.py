@@ -845,6 +845,47 @@ def handle_renew_api_context_command(message):
         logger.error(f"[RENEW_API_CONTEXT] خطأ في معالجة أمر تجديد السياق: {e}")
         bot.reply_to(message, f"❌ خطأ في معالجة الأمر: {str(e)}")
 
+@bot.message_handler(commands=['switch_hz'])
+@require_authentication
+def handle_switch_hz_command(message):
+    """معالج أمر تغيير تردد المراقبة بين 30s و 150s"""
+    global MONITORING_FREQUENCY
+    try:
+        user_id = message.from_user.id
+        logger.info(f"[SWITCH_HZ] المستخدم {user_id} طلب تغيير تردد المراقبة")
+        
+        # التبديل بين التردد الحالي
+        if MONITORING_FREQUENCY == 30:
+            # تغيير إلى 150 ثانية (2.5 دقيقة)
+            MONITORING_FREQUENCY = 150
+            new_frequency_text = "150 ثانية (2.5 دقيقة) ⏰"
+            frequency_description = "مراقبة متوسطة لتوفير الموارد"
+        else:
+            # تغيير إلى 30 ثانية
+            MONITORING_FREQUENCY = 30
+            new_frequency_text = "30 ثانية ⚡"
+            frequency_description = "مراقبة مكثفة للفرص السريعة"
+        
+        response_message = f"""
+✅ **تم تغيير تردد المراقبة بنجاح!**
+
+🔄 **التردد الجديد:** {new_frequency_text}
+📊 **الوصف:** {frequency_description}
+
+📋 **أوضاع التردد المتاحة:**
+• 30 ثانية ⚡: مراقبة سريعة ومكثفة
+• 150 ثانية ⏰: مراقبة متوسطة وموفرة للموارد
+
+⚠️ **ملاحظة:** التغيير سيؤثر على جميع دورات المراقبة القادمة
+        """
+        
+        bot.reply_to(message, response_message.strip(), parse_mode='Markdown')
+        logger.info(f"[SWITCH_HZ] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية للمستخدم {user_id}")
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في أمر تغيير التردد: {e}")
+        bot.reply_to(message, f"❌ خطأ في تغيير تردد المراقبة: {str(e)}")
+
 # دوال حساب النقاط المحسنة - منسوخة من التحليل الآلي الصحيح
 def get_asset_type_and_pip_size(symbol):
     """تحديد نوع الأصل وحجم النقطة بطريقة بسيطة ومباشرة"""
@@ -1088,7 +1129,7 @@ def format_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict,
         price_change_pct = indicators.get('price_change_pct', 0)
         if price_change_pct == -100 or price_change_pct < -99:
             try:
-                daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 2)
+                daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 1, 2)  # تجاهل اليوم الحالي
                 if daily_rates is not None and len(daily_rates) >= 2:
                     yesterday_close = daily_rates[-2]['close']
                     if yesterday_close > 0:
@@ -2517,8 +2558,8 @@ class MT5Manager:
             return None
         
         try:
-            # جلب البيانات
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+            # جلب البيانات - تجاهل الشمعة الحالية غير المكتملة للحصول على مؤشرات مستقرة
+            rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)  # start_pos = 1 لتجاهل الشمعة الحالية
             if rates is None or len(rates) == 0:
                 logger.warning(f"[WARNING] لا توجد بيانات للرمز {symbol}")
                 return None
@@ -2578,9 +2619,9 @@ class MT5Manager:
                 logger.warning(f"[WARNING] اتصال MT5 غير مستقر - لا يمكن حساب المؤشرات لـ {symbol}")
                 return None
             
-            # جلب أحدث البيانات اللحظية (M1 للحصول على أقصى دقة لحظية)
+            # جلب البيانات التاريخية المكتملة (M1 مع تجاهل الشمعة الحالية للمؤشرات المستقرة)
             with mt5_operation_lock:
-                df = self.get_market_data(symbol, mt5.TIMEFRAME_M1, 100)  # M1 لأحدث البيانات اللحظية
+                df = self.get_market_data(symbol, mt5.TIMEFRAME_M1, 100)  # M1 مع الشموع المكتملة فقط
             if df is None or len(df) < 20:
                 logger.warning(f"[WARNING] بيانات غير كافية لحساب المؤشرات لـ {symbol}")
                 return None
@@ -3036,10 +3077,64 @@ class MT5Manager:
                 else:
                     indicators['bollinger_interpretation'] = 'ضمن النطاق - حركة طبيعية'
             
-            # الدعم والمقاومة
-            if len(df) >= 20:
-                indicators['resistance'] = df['high'].rolling(window=20).max().iloc[-1]
-                indicators['support'] = df['low'].rolling(window=20).min().iloc[-1]
+            # الدعم والمقاومة - حساب محسن بناءً على النقاط المحورية والمستويات المهمة
+            if len(df) >= 50:
+                try:
+                    # حساب النقاط المحورية (Pivot Points) للحصول على مستويات دعم ومقاومة أكثر دقة
+                    highs = df['high']
+                    lows = df['low']
+                    closes = df['close']
+                    
+                    # حساب المتوسط المرجح للـ 20 شمعة الأخيرة للحصول على نقطة محورية
+                    recent_high = highs.tail(20).max()
+                    recent_low = lows.tail(20).min()
+                    recent_close = closes.iloc[-1]
+                    
+                    # حساب النقطة المحورية
+                    pivot = (recent_high + recent_low + recent_close) / 3
+                    
+                    # حساب مستويات الدعم والمقاومة بناءً على النقطة المحورية
+                    resistance_1 = 2 * pivot - recent_low  # R1
+                    support_1 = 2 * pivot - recent_high    # S1
+                    
+                    # تحسين المستويات بناءً على التقلبات الحديثة
+                    # استخدام ATR إذا كان متاحاً من الحسابات السابقة، وإلا احسبه
+                    if len(df) >= 14:
+                        atr_values = ta.volatility.average_true_range(highs, lows, closes, window=14)
+                        atr = atr_values.iloc[-1] if not pd.isna(atr_values.iloc[-1]) else (recent_high - recent_low) * 0.1
+                    else:
+                        atr = (recent_high - recent_low) * 0.1
+                    
+                    # التأكد من أن مستويات الدعم والمقاومة منطقية
+                    if resistance_1 > recent_close:
+                        indicators['resistance'] = float(resistance_1)
+                    else:
+                        # إذا كانت المقاومة أقل من السعر الحالي، استخدم أعلى قمة حديثة + ATR
+                        indicators['resistance'] = float(recent_high + atr)
+                    
+                    if support_1 < recent_close:
+                        indicators['support'] = float(support_1)
+                    else:
+                        # إذا كان الدعم أعلى من السعر الحالي، استخدم أدنى قاع حديث - ATR
+                        indicators['support'] = float(recent_low - atr)
+                    
+                    # التأكد من أن المقاومة أعلى من الدعم
+                    if indicators['resistance'] <= indicators['support']:
+                        # إعادة حساب بطريقة أبسط
+                        indicators['resistance'] = float(recent_close + atr * 2)
+                        indicators['support'] = float(recent_close - atr * 2)
+                    
+                    logger.debug(f"[SUPPORT_RESISTANCE] {symbol}: الدعم={indicators['support']:.5f}, المقاومة={indicators['resistance']:.5f}, النقطة المحورية={pivot:.5f}")
+                    
+                except Exception as sr_error:
+                    logger.error(f"[ERROR] خطأ في حساب الدعم والمقاومة: {sr_error}")
+                    # استخدام الحساب البسيط كبديل
+                    indicators['resistance'] = float(df['high'].tail(20).max())
+                    indicators['support'] = float(df['low'].tail(20).min())
+            elif len(df) >= 20:
+                # للبيانات القليلة، استخدم الحساب البسيط
+                indicators['resistance'] = float(df['high'].tail(20).max())
+                indicators['support'] = float(df['low'].tail(20).min())
             
             # حساب ATR (Average True Range) للتقلبات
             if len(df) >= 14:
@@ -5442,7 +5537,7 @@ class GeminiAnalyzer:
                 # إعادة حساب التغير بناءً على بيانات مباشرة
                 try:
                     # محاولة حساب التغير من بيانات MT5 مباشرة
-                    daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 2)
+                    daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 1, 2)  # تجاهل اليوم الحالي
                     if daily_rates is not None and len(daily_rates) >= 2:
                         yesterday_close = daily_rates[-2]['close']
                         today_current = current_price
@@ -12219,8 +12314,8 @@ def monitoring_loop():
             active_users = list(user_monitoring_active.keys())
             logger.debug(f"[DEBUG] المستخدمون النشطون: {active_users}")
             if not active_users:
-                logger.debug("[DEBUG] لا يوجد مستخدمين نشطين - انتظار 30 ثانية")
-                time.sleep(30)  # انتظار أطول إذا لم يكن هناك مستخدمين نشطين
+                logger.debug(f"[DEBUG] لا يوجد مستخدمين نشطين - انتظار {min(MONITORING_FREQUENCY, 30)} ثانية")
+                time.sleep(min(MONITORING_FREQUENCY, 30))  # انتظار محدود بحد أقصى 30 ثانية
                 continue
             
             successful_operations = 0
@@ -12345,8 +12440,8 @@ def monitoring_loop():
                     logger.info("[RECONNECT] محاولة إعادة اتصال شاملة بسبب أخطاء MT5 المتكررة...")
                     mt5_manager.check_real_connection()
             
-            # انتظار دقيقة واحدة - تردد محسن لتقليل استهلاك الموارد
-            time.sleep(60)
+            # انتظار حسب التردد المحدد (30s أو 150s)
+            time.sleep(MONITORING_FREQUENCY)
             
         except Exception as e:
             consecutive_errors += 1
