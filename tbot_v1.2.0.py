@@ -6984,8 +6984,17 @@ class GeminiAnalyzer:
             ask = price_data.get('ask', 0)
             spread = price_data.get('spread', 0)
             
-            # المؤشرات الفنية (نفس ما في التحليل اليدوي)
-            indicators = technical_data.get('indicators', {}) if technical_data else {}
+            # المؤشرات الفنية الجديدة متعددة الإطارات للتحليل الخلفي المحسن
+            try:
+                logger.info(f"[AUTO_AI_INDICATORS] جلب المؤشرات متعددة الإطارات للتحليل الآلي للرمز {symbol}")
+                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+                # استخدام المؤشرات الجديدة في التحليل الخلفي
+                indicators = self._consolidate_multi_tf_indicators_for_background_analysis(multi_tf_indicators)
+                logger.info(f"[AUTO_AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للتحليل الخلفي للرمز {symbol}")
+            except Exception as indicators_error:
+                logger.error(f"[AUTO_AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
+                # fallback للمؤشرات القديمة
+                indicators = technical_data.get('indicators', {}) if technical_data else {}
             
             # تجميع جميع البيانات للتحليل الخلفي
             background_prompt = self._build_enhanced_background_prompt(
