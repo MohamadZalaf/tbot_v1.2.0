@@ -84,6 +84,9 @@ monitoring_active = False
 # متغير لتردد المراقبة (بالثواني)
 MONITORING_FREQUENCY = 30  # التردد الافتراضي 30 ثانية
 
+# متغير للتحكم في طول الإشعارات (True = قصير، False = طويل)
+SHORT_NOTIFICATIONS = False
+
 # إضافة locks لتجنب التضارب في عمليات MT5
 import threading
 mt5_operation_lock = threading.RLock()  # RLock للسماح بإعادة الاستخدام من نفس الـ thread
@@ -727,8 +730,6 @@ def handle_api_status_command(message):
 🛠️ **أوامر التحكم:**
 • `/api_reset` - إعادة تعيين حالة API
 • `/renew_api_context` - تجديد سياق API والبدء من جديد
-• `/api_test` - اختبار API
-• `/api_notify` - إرسال إشعار تجريبي
 
 ───────────────────────
 🤖 **نظام مراقبة API v1.2.0**
@@ -772,6 +773,95 @@ def handle_api_reset_command(message):
     except Exception as e:
         logger.error(f"[API_RESET_CMD] خطأ في معالجة أمر إعادة تعيين API: {e}")
         bot.reply_to(message, f"❌ خطأ في إعادة تعيين API: {str(e)}")
+
+@bot.message_handler(commands=['switch_notification_length'])
+def handle_switch_notification_length_command(message):
+    """معالج أمر تبديل طول الإشعارات - للمطور فقط"""
+    try:
+        user_id = message.from_user.id
+        DEVELOPER_ID = 6891599955  # ID المطور الفعلي
+        
+        # التحقق من أن المستخدم هو المطور
+        if user_id != DEVELOPER_ID:
+            bot.reply_to(message, "⚠️ هذا الأمر متاح للمطور فقط")
+            return
+        
+        # تبديل حالة طول الإشعارات
+        global SHORT_NOTIFICATIONS
+        SHORT_NOTIFICATIONS = not SHORT_NOTIFICATIONS
+        
+        status = "قصير" if SHORT_NOTIFICATIONS else "طويل"
+        
+        # رسالة للمطور
+        developer_message = f"""
+✅ **تم تبديل طول الإشعارات**
+
+📊 **الحالة الجديدة:** {status}
+🕐 **الوقت:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+سيتم إشعار جميع المستخدمين بالتغيير...
+        """
+        
+        bot.reply_to(message, developer_message, parse_mode='Markdown')
+        
+        # إشعار جميع المستخدمين النشطين
+        try:
+            # جلب قائمة المستخدمين النشطين
+            active_users = get_active_users()  # دالة موجودة مسبقاً
+            
+            notification_message = f"""
+🔄 **تحديث نظام الإشعارات**
+
+تم تبديل شكل رسائل الإشعارات إلى النمط **{status}**.
+
+{'📊 ستصلك الآن إشعارات مختصرة وسريعة' if SHORT_NOTIFICATIONS else '📋 ستصلك الآن إشعارات مفصلة وشاملة'}
+
+🤖 **بوت التداول v1.2.0**
+            """
+            
+            sent_count = 0
+            failed_count = 0
+            
+            for user_id in active_users:
+                try:
+                    bot.send_message(
+                        chat_id=user_id,
+                        text=notification_message,
+                        parse_mode='Markdown'
+                    )
+                    sent_count += 1
+                except Exception as send_error:
+                    logger.error(f"[NOTIFICATION_SWITCH] فشل إرسال إشعار التبديل للمستخدم {user_id}: {send_error}")
+                    failed_count += 1
+            
+            # تقرير للمطور
+            report_message = f"""
+📊 **تقرير إشعار التبديل**
+
+✅ تم الإرسال: {sent_count} مستخدم
+❌ فشل الإرسال: {failed_count} مستخدم
+📊 إجمالي المستخدمين: {len(active_users)}
+            """
+            
+            bot.send_message(
+                chat_id=DEVELOPER_ID,
+                text=report_message,
+                parse_mode='Markdown'
+            )
+            
+            logger.info(f"[NOTIFICATION_SWITCH] تم تبديل طول الإشعارات إلى {status} وإشعار {sent_count} مستخدم")
+            
+        except Exception as notification_error:
+            logger.error(f"[NOTIFICATION_SWITCH] خطأ في إرسال إشعارات التبديل: {notification_error}")
+            bot.send_message(
+                chat_id=DEVELOPER_ID,
+                text=f"❌ فشل في إرسال إشعارات التبديل: {str(notification_error)}",
+                parse_mode='Markdown'
+            )
+        
+    except Exception as e:
+        logger.error(f"[SWITCH_NOTIFICATION] خطأ في معالجة أمر تبديل الإشعارات: {e}")
+        bot.reply_to(message, f"❌ خطأ في تبديل طول الإشعارات: {str(e)}")
 
 @bot.message_handler(commands=['renew_api_context'])
 def handle_renew_api_context_command(message):
@@ -992,6 +1082,63 @@ def calculate_points_accurately(price_diff, symbol, capital=None, current_price=
         return 0
 
 # دالة تنسيق رسائل الإشعارات المختصرة
+def format_very_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict, analysis: Dict, user_id: int) -> str:
+    """تنسيق رسائل الإشعارات القصيرة جداً حسب التصميم الجديد"""
+    try:
+        current_price = price_data.get('last', price_data.get('bid', 0))
+        action = analysis.get('action')
+        confidence = analysis.get('confidence', 0)
+        
+        # الحصول على الأهداف ووقف الخسارة
+        entry_price = analysis.get('entry_price') or current_price
+        target1 = analysis.get('target1')
+        stop_loss = analysis.get('stop_loss')
+        
+        # حساب النقاط
+        asset_type, pip_size = get_asset_type_and_pip_size(symbol)
+        
+        target_points = 0
+        stop_points = 0
+        
+        if target1 and entry_price:
+            if action == 'BUY':
+                target_points = abs(target1 - entry_price) / pip_size
+            elif action == 'SELL':
+                target_points = abs(entry_price - target1) / pip_size
+        
+        if stop_loss and entry_price:
+            if action == 'BUY':
+                stop_points = abs(entry_price - stop_loss) / pip_size
+            elif action == 'SELL':
+                stop_points = abs(stop_loss - entry_price) / pip_size
+        
+        # تحديد نوع الصفقة
+        trade_type = "شراء" if action == 'BUY' else "بيع" if action == 'SELL' else "انتظار"
+        
+        # تحديد الفريم (افتراضي M15)
+        timeframe = "M15"
+        
+        # تحديد السبب (مبسط)
+        reason = "تقاطع EMA + كسر مقاومة" if action == 'BUY' else "تقاطع EMA + كسر دعم" if action == 'SELL' else "عدم وضوح الاتجاه"
+        
+        message = f"""📊 **صفقة مقترحة**
+
+**الزوج:** {symbol}
+**نوع الصفقة:** {trade_type}
+**سعر الدخول:** {entry_price:.5f}
+**الهدف:** ({target_points:.0f} نقطة)
+**وقف الخسارة:** (-{stop_points:.0f} نقطة)
+
+⏰ **الفريم:** {timeframe}
+📈 **نسبة النجاح المتوقعة:** {confidence:.0f}%
+💡 **السبب:** {reason}"""
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في تنسيق الإشعار القصير: {e}")
+        return f"📊 **صفقة مقترحة** - {symbol}\n\nحدث خطأ في التنسيق"
+
 def format_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict, analysis: Dict, user_id: int) -> str:
     """تنسيق رسائل الإشعارات المختصرة باستخدام أسلوب التحليل اليدوي الشامل مع AI"""
     try:
@@ -8813,11 +8960,14 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
                 logger.error(f"[ERROR] فشل في إرسال الإشعار البسيط: {send_error}")
             return  # إنهاء الدالة مبكراً في حالة الخطأ
         
-        # استخدام دالة الإشعار المختصرة بدلاً من الرسالة الكاملة
-        short_message = format_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
-        
-        # استخدام الرسالة المختصرة للإشعارات
-        message = short_message
+        # استخدام النوع المناسب من الإشعارات حسب الإعداد العام
+        global SHORT_NOTIFICATIONS
+        if SHORT_NOTIFICATIONS:
+            # استخدام الإشعارات القصيرة جداً
+            message = format_very_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
+        else:
+            # استخدام الإشعارات المختصرة العادية
+            message = format_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
         
         # إنشاء أزرار التقييم
         markup = create_feedback_buttons(trade_id) if trade_id else None
@@ -9042,6 +9192,7 @@ def create_main_keyboard():
         types.KeyboardButton("📊 إحصائياتي")
     )
     keyboard.row(
+        types.KeyboardButton("📰 الأخبار الاقتصادية"),
         types.KeyboardButton("⚙️ الإعدادات")
     )
     keyboard.row(
@@ -9378,6 +9529,44 @@ def handle_settings_keyboard(message):
     """معالج زر الإعدادات من الكيبورد"""
     handle_settings_callback(message)
 
+
+@bot.message_handler(func=lambda message: message.text == "📰 الأخبار الاقتصادية")
+@require_authentication
+def handle_economic_news_keyboard(message):
+    """معالج زر الأخبار الاقتصادية من الكيبورد"""
+    try:
+        user_id = message.from_user.id
+        
+        message_text = """
+📰 **الأخبار الاقتصادية**
+
+اختر ما تريد فعله:
+
+• **جلب الأخبار:** للحصول على آخر الأخبار الاقتصادية
+• **تحديد الرموز:** لاختيار الرموز التي تريد متابعة أخبارها
+        """
+        
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        
+        markup.row(
+            create_animated_button("📡 جلب الأخبار", "fetch_news", "📡")
+        )
+        markup.row(
+            create_animated_button("🎯 تحديد الرموز", "select_news_symbols", "🎯")
+        )
+        markup.row(
+            create_animated_button("🔙 القائمة الرئيسية", "main_menu", "🔙")
+        )
+        
+        bot.send_message(
+            user_id,
+            message_text,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+            
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في الأخبار الاقتصادية: {e}")
 
 @bot.message_handler(func=lambda message: message.text == "❓ المساعدة")
 @require_authentication
@@ -9812,6 +10001,282 @@ def handle_my_stats(call):
         logger.error(f"[ERROR] خطأ في عرض الإحصائيات: {e}")
         bot.answer_callback_query(call.id, "حدث خطأ في جلب الإحصائيات", show_alert=True)
 
+# ===== معالجات الأخبار الاقتصادية =====
+@bot.callback_query_handler(func=lambda call: call.data == "select_news_symbols")
+def handle_select_news_symbols(call):
+    """معالج اختيار الرموز للأخبار"""
+    try:
+        message_text = """
+🎯 **اختيار الرموز للأخبار**
+
+اختر فئة الرموز التي تريد متابعة أخبارها:
+        """
+        
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        
+        markup.row(
+            create_animated_button("💶 العملات الأجنبية", "news_forex", "💶"),
+            create_animated_button("🥇 المعادن النفيسة", "news_metals", "🥇")
+        )
+        markup.row(
+            create_animated_button("₿ العملات الرقمية", "news_crypto", "₿"),
+            create_animated_button("📈 الأسهم الأمريكية", "news_stocks", "📈")
+        )
+        markup.row(
+            create_animated_button("📊 المؤشرات", "news_indices", "📊")
+        )
+        markup.row(
+            create_animated_button("🔙 العودة", "economic_news_main", "🔙")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=message_text,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في اختيار رموز الأخبار: {e}")
+        bot.answer_callback_query(call.id, "حدث خطأ في عرض الرموز", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data == "economic_news_main")
+def handle_economic_news_main(call):
+    """العودة للقائمة الرئيسية للأخبار"""
+    try:
+        message_text = """
+📰 **الأخبار الاقتصادية**
+
+اختر ما تريد فعله:
+
+• **جلب الأخبار:** للحصول على آخر الأخبار الاقتصادية
+• **تحديد الرموز:** لاختيار الرموز التي تريد متابعة أخبارها
+        """
+        
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        
+        markup.row(
+            create_animated_button("📡 جلب الأخبار", "fetch_news", "📡")
+        )
+        markup.row(
+            create_animated_button("🎯 تحديد الرموز", "select_news_symbols", "🎯")
+        )
+        markup.row(
+            create_animated_button("🔙 القائمة الرئيسية", "main_menu", "🔙")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=message_text,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في العودة لقائمة الأخبار: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("news_"))
+def handle_news_category_selection(call):
+    """معالج اختيار فئة الرموز للأخبار"""
+    try:
+        category = call.data.replace("news_", "")
+        
+        # تحديد الرموز حسب الفئة (نفس ما في التحليل)
+        if category == "forex":
+            symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD', 'EURJPY', 'GBPJPY', 'EURGBP']
+            title = "💶 أخبار العملات الأجنبية"
+            emoji = "💶"
+        elif category == "metals":
+            symbols = ['XAUUSD', 'XAGUSD']
+            title = "🥇 أخبار المعادن النفيسة"
+            emoji = "🥇"
+        elif category == "crypto":
+            symbols = ['BTCUSD', 'ETHUSD', 'LTCUSD', 'XRPUSD', 'ADAUSD', 'BNBUSD']
+            title = "₿ أخبار العملات الرقمية"
+            emoji = "₿"
+        elif category == "stocks":
+            symbols = ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NVDA', 'META', 'NFLX']
+            title = "📈 أخبار الأسهم الأمريكية"
+            emoji = "📈"
+        elif category == "indices":
+            symbols = ['US30', 'US500', 'NAS100', 'UK100', 'GER30', 'FRA40', 'JPN225']
+            title = "📊 أخبار المؤشرات"
+            emoji = "📊"
+        else:
+            bot.answer_callback_query(call.id, "فئة غير صالحة", show_alert=True)
+            return
+        
+        # إنشاء أزرار الرموز
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        
+        # إضافة أزرار الرموز
+        for i in range(0, len(symbols), 2):
+            row_buttons = []
+            for j in range(2):
+                if i + j < len(symbols):
+                    symbol = symbols[i + j]
+                    symbol_info = ALL_SYMBOLS.get(symbol, {'name': symbol, 'emoji': emoji})
+                    row_buttons.append(create_animated_button(
+                        f"{symbol_info['emoji']} {symbol}", 
+                        f"get_news_{symbol}", 
+                        symbol_info['emoji']
+                    ))
+            if row_buttons:
+                markup.row(*row_buttons)
+        
+        # زر العودة
+        markup.row(
+            create_animated_button("🔙 العودة لاختيار الفئات", "select_news_symbols", "🔙")
+        )
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"{title}\n\nاختر الرمز الذي تريد متابعة أخباره:",
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في معالجة فئة الأخبار: {e}")
+        bot.answer_callback_query(call.id, "حدث خطأ في عرض الرموز", show_alert=True)
+
+# قاموس لحفظ آخر تحديث للأخبار لكل رمز (لمنع التحديث قبل 15 دقيقة)
+news_last_update = {}
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("get_news_"))
+def handle_get_symbol_news(call):
+    """معالج جلب أخبار رمز معين"""
+    try:
+        user_id = call.from_user.id
+        symbol = call.data.replace("get_news_", "")
+        
+        # التحقق من آخر تحديث (منع التحديث قبل 15 دقيقة)
+        now = datetime.now()
+        last_update = news_last_update.get(f"{user_id}_{symbol}")
+        
+        if last_update and (now - last_update).total_seconds() < 900:  # 15 دقيقة = 900 ثانية
+            remaining_minutes = 15 - int((now - last_update).total_seconds() / 60)
+            bot.answer_callback_query(
+                call.id, 
+                f"⏰ يرجى الانتظار {remaining_minutes} دقيقة قبل تحديث الأخبار مرة أخرى", 
+                show_alert=True
+            )
+            return
+        
+        # رسالة انتظار
+        bot.edit_message_text(
+            f"🔄 **جاري جلب الأخبار**\n\n"
+            f"⏳ يرجى الانتظار بينما نجلب آخر الأخبار الاقتصادية المتعلقة بـ {symbol}...",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode='Markdown'
+        )
+        
+        # جلب الأخبار من الـ AI
+        try:
+            news_content = get_symbol_news_from_ai(symbol)
+            
+            if news_content:
+                # حفظ وقت التحديث
+                news_last_update[f"{user_id}_{symbol}"] = now
+                
+                # إنشاء أزرار
+                markup = types.InlineKeyboardMarkup(row_width=2)
+                
+                markup.row(
+                    create_animated_button("🔄 تحديث الأخبار", f"get_news_{symbol}", "🔄")
+                )
+                markup.row(
+                    create_animated_button("🔙 اختيار رمز آخر", "select_news_symbols", "🔙"),
+                    create_animated_button("🏠 القائمة الرئيسية", "main_menu", "🏠")
+                )
+                
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=news_content,
+                    parse_mode='Markdown',
+                    reply_markup=markup
+                )
+                
+                logger.info(f"[NEWS_SUCCESS] تم جلب أخبار {symbol} للمستخدم {user_id}")
+                
+            else:
+                bot.edit_message_text(
+                    f"❌ **فشل في جلب الأخبار**\n\n"
+                    f"لا يمكن الحصول على أخبار {symbol} حالياً.\n\n"
+                    "يرجى المحاولة مرة أخرى لاحقاً.",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as news_error:
+            logger.error(f"[NEWS_ERROR] خطأ في جلب أخبار {symbol}: {news_error}")
+            bot.edit_message_text(
+                f"❌ **خطأ في جلب الأخبار**\n\n"
+                f"حدث خطأ في جلب أخبار {symbol}.\n\n"
+                f"الخطأ: {str(news_error)[:100]}...",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode='Markdown'
+            )
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في معالجة جلب الأخبار: {e}")
+        bot.answer_callback_query(call.id, "حدث خطأ في جلب الأخبار", show_alert=True)
+
+def get_symbol_news_from_ai(symbol: str) -> str:
+    """جلب الأخبار الاقتصادية لرمز معين من الـ AI"""
+    try:
+        # إنشاء prompt لجلب الأخبار
+        news_prompt = f"""
+أنت محلل اقتصادي متخصص في الأسواق المالية. قم بجلب آخر الأخبار الاقتصادية المؤثرة على الرمز {symbol} من موقع Forex Factory أو مصادر إخبارية موثوقة.
+
+**المطلوب:**
+1. خبرين قصيرين فقط (عناوين + جملة واحدة للتوضيح)
+2. يجب أن يؤثران بشكل مباشر على {symbol}
+3. أخبار حديثة (آخر 24 ساعة)
+4. تحليل سريع لتأثير كل خبر
+
+**التنسيق المطلوب:**
+📰 **أخبار {symbol}**
+
+🔸 **الخبر الأول:**
+العنوان: [عنوان الخبر]
+التأثير: [قد يؤدي لارتفاع/انخفاض/تذبذب] في {symbol}
+
+🔸 **الخبر الثاني:**
+العنوان: [عنوان الخبر]
+التأثير: [قد يؤدي لارتفاع/انخفاض/تذبذب] في {symbol}
+
+💡 **ملاحظة AI:** [توصية مختصرة حول التأثير المتوقع]
+
+⏰ **آخر تحديث:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
+        """
+        
+        # إرسال للـ AI
+        try:
+            if gemini_analyzer.model:
+                response = gemini_analyzer.model.generate_content(news_prompt)
+                if response and response.text:
+                    return response.text.strip()
+                else:
+                    return None
+            else:
+                return None
+                
+        except Exception as ai_error:
+            logger.error(f"[NEWS_AI_ERROR] خطأ في جلب الأخبار من AI للرمز {symbol}: {ai_error}")
+            return None
+        
+    except Exception as e:
+        logger.error(f"[NEWS_ERROR] خطأ عام في جلب أخبار {symbol}: {e}")
+        return None
+
 # ===== معالجات إضافية للأزرار =====
 @bot.callback_query_handler(func=lambda call: call.data.startswith("analyze_symbol_"))
 def handle_single_symbol_analysis(call):
@@ -9963,39 +10428,21 @@ def handle_single_symbol_analysis(call):
             
             logger.info(f"[SUCCESS] تم إرسال تحليل الرمز {symbol} للمستخدم {user_id}")
             
-            # إرسال رسالة المؤشرات الفنية متعددة الإطارات بعد التحليل
+            # حساب المؤشرات الفنية متعددة الإطارات في الخلفية للـ AI (بدون إرسال للمستخدم)
             try:
-                logger.info(f"[INDICATORS] بدء حساب المؤشرات متعددة الإطارات للرمز {symbol}")
+                logger.info(f"[INDICATORS_BACKGROUND] حساب المؤشرات متعددة الإطارات في الخلفية للرمز {symbol}")
                 
-                # حساب المؤشرات على الفريمات المختلفة
+                # حساب المؤشرات على الفريمات المختلفة للـ AI فقط
                 multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
                 
                 if multi_tf_indicators:
-                    # تنسيق رسالة المؤشرات
-                    indicators_message = format_multi_timeframe_indicators_message(symbol, symbol_info, multi_tf_indicators)
-                    
-                    # إرسال رسالة المؤشرات
-                    bot.send_message(
-                        chat_id=call.message.chat.id,
-                        text=indicators_message,
-                        parse_mode='Markdown'
-                    )
-                    
-                    logger.info(f"[SUCCESS] تم إرسال المؤشرات متعددة الإطارات للرمز {symbol}")
+                    logger.info(f"[SUCCESS] تم حساب المؤشرات متعددة الإطارات في الخلفية للرمز {symbol}")
                 else:
-                    logger.warning(f"[WARNING] لا توجد مؤشرات متاحة للرمز {symbol}")
+                    logger.warning(f"[WARNING] لا توجد مؤشرات متاحة في الخلفية للرمز {symbol}")
                     
             except Exception as indicators_error:
-                logger.error(f"[ERROR] فشل في إرسال المؤشرات للرمز {symbol}: {indicators_error}")
-                # إرسال رسالة خطأ بسيطة للمؤشرات
-                try:
-                    bot.send_message(
-                        chat_id=call.message.chat.id,
-                        text=f"⚠️ **تعذر جلب المؤشرات الفنية للرمز {symbol}**\n\nسبب الخطأ: مشكلة في الاتصال بـ MetaTrader5 أو نقص البيانات.",
-                        parse_mode='Markdown'
-                    )
-                except:
-                    pass  # تجاهل خطأ إرسال رسالة الخطأ
+                logger.error(f"[ERROR] فشل في حساب المؤشرات في الخلفية للرمز {symbol}: {indicators_error}")
+                # لا نرسل أي رسالة خطأ للمستخدم - فقط لوج
             
         except Exception as send_error:
             logger.error(f"[ERROR] فشل في إرسال التحليل: {send_error}")
