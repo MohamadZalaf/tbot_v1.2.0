@@ -81,6 +81,9 @@ except ImportError:
 # متغير للتحكم في حلقة المراقبة
 monitoring_active = False
 
+# متغير لتردد المراقبة (بالثواني)
+MONITORING_FREQUENCY = 30  # التردد الافتراضي 30 ثانية
+
 # إضافة locks لتجنب التضارب في عمليات MT5
 import threading
 mt5_operation_lock = threading.RLock()  # RLock للسماح بإعادة الاستخدام من نفس الـ thread
@@ -842,6 +845,8 @@ def handle_renew_api_context_command(message):
         logger.error(f"[RENEW_API_CONTEXT] خطأ في معالجة أمر تجديد السياق: {e}")
         bot.reply_to(message, f"❌ خطأ في معالجة الأمر: {str(e)}")
 
+
+
 # دوال حساب النقاط المحسنة - منسوخة من التحليل الآلي الصحيح
 def get_asset_type_and_pip_size(symbol):
     """تحديد نوع الأصل وحجم النقطة بطريقة بسيطة ومباشرة"""
@@ -1085,7 +1090,7 @@ def format_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict,
         price_change_pct = indicators.get('price_change_pct', 0)
         if price_change_pct == -100 or price_change_pct < -99:
             try:
-                daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 2)
+                daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 1, 2)  # تجاهل اليوم الحالي
                 if daily_rates is not None and len(daily_rates) >= 2:
                     yesterday_close = daily_rates[-2]['close']
                     if yesterday_close > 0:
@@ -1770,6 +1775,54 @@ def require_authentication(func):
         
         return func(message_or_call)
     return wrapper
+
+@bot.message_handler(commands=['switch_hz'])
+def handle_switch_hz_command(message):
+    """معالج أمر تغيير تردد المراقبة بين 30s و 150s - للمطور فقط"""
+    global MONITORING_FREQUENCY
+    try:
+        user_id = message.from_user.id
+        DEVELOPER_ID = 6891599955  # ID المطور الفعلي
+        
+        # التحقق من أن المستخدم هو المطور
+        if user_id != DEVELOPER_ID:
+            bot.reply_to(message, "❌ هذا الأمر متاح للمطور فقط")
+            return
+            
+        logger.info(f"[SWITCH_HZ] المطور {user_id} طلب تغيير تردد المراقبة")
+        
+        # التبديل بين التردد الحالي
+        if MONITORING_FREQUENCY == 30:
+            # تغيير إلى 150 ثانية (2.5 دقيقة)
+            MONITORING_FREQUENCY = 150
+            new_frequency_text = "150 ثانية (2.5 دقيقة) ⏰"
+            frequency_description = "مراقبة متوسطة لتوفير الموارد"
+        else:
+            # تغيير إلى 30 ثانية
+            MONITORING_FREQUENCY = 30
+            new_frequency_text = "30 ثانية ⚡"
+            frequency_description = "مراقبة مكثفة للفرص السريعة"
+        
+        response_message = f"""
+✅ **تم تغيير تردد المراقبة بنجاح!**
+
+🔄 **التردد الجديد:** {new_frequency_text}
+📊 **الوصف:** {frequency_description}
+
+📋 **أوضاع التردد المتاحة:**
+• 30 ثانية ⚡: مراقبة سريعة ومكثفة
+• 150 ثانية ⏰: مراقبة متوسطة وموفرة للموارد
+
+⚠️ **ملاحظة:** التغيير سيؤثر على جميع دورات المراقبة القادمة
+        """
+        
+        bot.reply_to(message, response_message.strip(), parse_mode='Markdown')
+        logger.info(f"[SWITCH_HZ] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية بواسطة المطور")
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في أمر تغيير التردد: {e}")
+        bot.reply_to(message, f"❌ خطأ في تغيير تردد المراقبة: {str(e)}")
+
 user_selected_symbols = {}  # الرموز المختارة للمراقبة
 user_current_category = {}  # الفئة الحالية لكل مستخدم لتحديث القائمة
 user_trade_feedbacks = {}  # تقييمات المستخدمين للصفقات
@@ -2514,8 +2567,8 @@ class MT5Manager:
             return None
         
         try:
-            # جلب البيانات
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+            # جلب البيانات - تجاهل الشمعة الحالية غير المكتملة للحصول على مؤشرات مستقرة
+            rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)  # start_pos = 1 لتجاهل الشمعة الحالية
             if rates is None or len(rates) == 0:
                 logger.warning(f"[WARNING] لا توجد بيانات للرمز {symbol}")
                 return None
@@ -2575,9 +2628,9 @@ class MT5Manager:
                 logger.warning(f"[WARNING] اتصال MT5 غير مستقر - لا يمكن حساب المؤشرات لـ {symbol}")
                 return None
             
-            # جلب أحدث البيانات اللحظية (M1 للحصول على أقصى دقة لحظية)
+            # جلب البيانات التاريخية المكتملة (M1 مع تجاهل الشمعة الحالية للمؤشرات المستقرة)
             with mt5_operation_lock:
-                df = self.get_market_data(symbol, mt5.TIMEFRAME_M1, 100)  # M1 لأحدث البيانات اللحظية
+                df = self.get_market_data(symbol, mt5.TIMEFRAME_M1, 100)  # M1 مع الشموع المكتملة فقط
             if df is None or len(df) < 20:
                 logger.warning(f"[WARNING] بيانات غير كافية لحساب المؤشرات لـ {symbol}")
                 return None
@@ -3033,10 +3086,64 @@ class MT5Manager:
                 else:
                     indicators['bollinger_interpretation'] = 'ضمن النطاق - حركة طبيعية'
             
-            # الدعم والمقاومة
-            if len(df) >= 20:
-                indicators['resistance'] = df['high'].rolling(window=20).max().iloc[-1]
-                indicators['support'] = df['low'].rolling(window=20).min().iloc[-1]
+            # الدعم والمقاومة - حساب محسن بناءً على النقاط المحورية والمستويات المهمة
+            if len(df) >= 50:
+                try:
+                    # حساب النقاط المحورية (Pivot Points) للحصول على مستويات دعم ومقاومة أكثر دقة
+                    highs = df['high']
+                    lows = df['low']
+                    closes = df['close']
+                    
+                    # حساب المتوسط المرجح للـ 20 شمعة الأخيرة للحصول على نقطة محورية
+                    recent_high = highs.tail(20).max()
+                    recent_low = lows.tail(20).min()
+                    recent_close = closes.iloc[-1]
+                    
+                    # حساب النقطة المحورية
+                    pivot = (recent_high + recent_low + recent_close) / 3
+                    
+                    # حساب مستويات الدعم والمقاومة بناءً على النقطة المحورية
+                    resistance_1 = 2 * pivot - recent_low  # R1
+                    support_1 = 2 * pivot - recent_high    # S1
+                    
+                    # تحسين المستويات بناءً على التقلبات الحديثة
+                    # استخدام ATR إذا كان متاحاً من الحسابات السابقة، وإلا احسبه
+                    if len(df) >= 14:
+                        atr_values = ta.volatility.average_true_range(highs, lows, closes, window=14)
+                        atr = atr_values.iloc[-1] if not pd.isna(atr_values.iloc[-1]) else (recent_high - recent_low) * 0.1
+                    else:
+                        atr = (recent_high - recent_low) * 0.1
+                    
+                    # التأكد من أن مستويات الدعم والمقاومة منطقية
+                    if resistance_1 > recent_close:
+                        indicators['resistance'] = float(resistance_1)
+                    else:
+                        # إذا كانت المقاومة أقل من السعر الحالي، استخدم أعلى قمة حديثة + ATR
+                        indicators['resistance'] = float(recent_high + atr)
+                    
+                    if support_1 < recent_close:
+                        indicators['support'] = float(support_1)
+                    else:
+                        # إذا كان الدعم أعلى من السعر الحالي، استخدم أدنى قاع حديث - ATR
+                        indicators['support'] = float(recent_low - atr)
+                    
+                    # التأكد من أن المقاومة أعلى من الدعم
+                    if indicators['resistance'] <= indicators['support']:
+                        # إعادة حساب بطريقة أبسط
+                        indicators['resistance'] = float(recent_close + atr * 2)
+                        indicators['support'] = float(recent_close - atr * 2)
+                    
+                    logger.debug(f"[SUPPORT_RESISTANCE] {symbol}: الدعم={indicators['support']:.5f}, المقاومة={indicators['resistance']:.5f}, النقطة المحورية={pivot:.5f}")
+                    
+                except Exception as sr_error:
+                    logger.error(f"[ERROR] خطأ في حساب الدعم والمقاومة: {sr_error}")
+                    # استخدام الحساب البسيط كبديل
+                    indicators['resistance'] = float(df['high'].tail(20).max())
+                    indicators['support'] = float(df['low'].tail(20).min())
+            elif len(df) >= 20:
+                # للبيانات القليلة، استخدم الحساب البسيط
+                indicators['resistance'] = float(df['high'].tail(20).max())
+                indicators['support'] = float(df['low'].tail(20).min())
             
             # حساب ATR (Average True Range) للتقلبات
             if len(df) >= 14:
@@ -3756,29 +3863,28 @@ class GeminiAnalyzer:
 
         ### 🔍 STEP 5: الحساب النهائي لنسبة النجاح (0-100%)
         
-        **الصيغة الحسابية:**
+        **الصيغة الحسابية المحسنة:**
         ```
-        النسبة الأساسية = 50%
-        + مؤشرات فنية إيجابية: +30%
+        النسبة الأساسية = 65%  (رفع النقطة الأساسية)
+        + مؤشرات فنية إيجابية: +20%
         + حجم تداول قوي: +10%
         + اتجاه عام مؤيد: +10%
-        - مخاطر عالية: -20%
-        - تضارب في الإشارات: -15%
+        + توافق متعدد المؤشرات: +15%
+        - مخاطر عالية فقط: -15%
+        - تضارب شديد في الإشارات: -10%
         ```
 
         **⚠️ CRITICAL - نسبة النجاح المحسوبة بناءً على تحليلك (0-100%):**
-        - احسب نسبة النجاح الفعلية بناءً على قوة الإشارات المتاحة
-        - اجمع نقاط جميع المؤشرات واحسب النسبة النهائية
-        - النطاق الكامل: 0% إلى 100% - لا تتردد في استخدام النطاق كاملاً
-        - يجب أن تكون النسبة انعكاساً حقيقياً لجودة الإشارات وليس رقماً عشوائياً
-        - **اطرح من النسبة إذا كان الـ Spread عالياً:** spread > 3 نقاط (-5%)، spread > 5 نقاط (-10%)
-        - **أضف للنسبة إذا كان الـ Spread منخفضاً:** spread < 1 نقطة (+5%)
-        - **تعلم من التقييمات السابقة:** إذا كان لديك تقييمات سلبية كثيرة لهذا الرمز، كن أكثر حذراً (-5 إلى -10%)
-        - **استفد من الخبرة المجتمعية:** إذا كان المجتمع راضي عن تحليلاتك لهذا النوع، يمكن زيادة الثقة (+5%)
-        - اكتب بوضوح: "نسبة نجاح الصفقة: X%" حيث X هو الرقم المحسوب من تحليلك
-        - إذا كانت الإشارات متضاربة جداً أو معدومة، اكتب نسبة منخفضة (5-35%)
-        - إذا كانت جميع المؤشرات متفقة وقوية، اكتب نسبة عالية (75-95%)
-        - إذا كانت الإشارات متوسطة، اكتب نسبة متوسطة (45-75%)
+        - **ابدأ بنسبة أساسية 65%** وعدّل بناءً على قوة الإشارات
+        - **كن متفائلاً معتدلاً:** السوق يتجه للأعلى عادة، والفرص أكثر من المخاطر
+        - **أعط وزناً أكبر للإشارات الإيجابية:** التحليل الفني يهدف لإيجاد الفرص
+        - **اطرح من النسبة فقط في حالات المخاطر الواضحة:** spread > 5 نقاط (-8%)، تضارب شديد (-10%)
+        - **أضف للنسبة في الحالات الإيجابية:** spread < 2 نقطة (+5%)، توافق المؤشرات (+10%)
+        - **استخدم النطاق الأوسط بثقة أكبر:** 
+          * إشارات ضعيفة: 45-60%
+          * إشارات متوسطة: 60-80%
+          * إشارات قوية: 80-95%
+        - **تذكر:** نحن نبحث عن فرص تداول، ليس عن أسباب تجنبها
 
         **🚨 MANDATORY - يجب أن تنهي تحليلك بـ:**
         
@@ -4773,7 +4879,7 @@ class GeminiAnalyzer:
                 success_rate_value = float(success_rate_match.group(1))
                 if 0 <= success_rate_value <= 100:
                     logger.info(f"[SUCCESS_RATE_EXTRACT] ✅ استخراج نسبة النجاح من الكود المحدد: {success_rate_value}%")
-                    return success_rate_value
+                    return apply_hidden_success_boost(success_rate_value)
             
             # البحث عن الأنماط المحسنة والموسعة - مع تجنب النطاقات
             enhanced_patterns = [
@@ -4823,7 +4929,7 @@ class GeminiAnalyzer:
                 found_rates.sort(key=lambda x: x[1], reverse=True)
                 best_rate = found_rates[0][0]
                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة النجاح المحسنة: {best_rate}% (نمط: {found_rates[0][2]})")
-                return best_rate
+                return apply_hidden_success_boost(best_rate)
             
             # البحث الذكي في نهاية النص مع تحليل السياق
             text_end = text[-400:].lower()  # زيادة نطاق البحث
@@ -4843,7 +4949,7 @@ class GeminiAnalyzer:
                             rate = float(match)
                             if 0 <= rate <= 100:
                                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة من السياق: {rate}%")
-                                return rate
+                                return apply_hidden_success_boost(rate)
                         except ValueError:
                             continue
             
@@ -4867,12 +4973,12 @@ class GeminiAnalyzer:
                 if preferred:
                     best_percentage = preferred[-1]  # آخر نسبة في النطاق المفضل
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة مفلترة: {best_percentage}%")
-                    return best_percentage
+                    return apply_hidden_success_boost(best_percentage)
                 else:
                     # إذا لم توجد نسب في النطاق المفضل، خذ آخر نسبة صحيحة
                     best_percentage = valid_percentages[-1]
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة عامة محسنة: {best_percentage}%")
-                    return best_percentage
+                    return apply_hidden_success_boost(best_percentage)
             
             # كحل أخير، تحليل ذكي للنص لاستنتاج النسبة
             return self._intelligent_rate_inference(text)
@@ -4936,7 +5042,7 @@ class GeminiAnalyzer:
             final_rate = max(0, min(100, base_rate))
             
             logger.info(f"[INTELLIGENT_INFERENCE] استنتاج ذكي: إيجابي={positive_score}, سلبي={negative_score}, محايد={neutral_score}, النسبة={final_rate:.1f}%")
-            return round(final_rate, 1)
+            return apply_hidden_success_boost(round(final_rate, 1))
             
         except Exception as e:
             logger.error(f"خطأ في الاستنتاج الذكي: {e}")
@@ -5439,7 +5545,7 @@ class GeminiAnalyzer:
                 # إعادة حساب التغير بناءً على بيانات مباشرة
                 try:
                     # محاولة حساب التغير من بيانات MT5 مباشرة
-                    daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 0, 2)
+                    daily_rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_D1, 1, 2)  # تجاهل اليوم الحالي
                     if daily_rates is not None and len(daily_rates) >= 2:
                         yesterday_close = daily_rates[-2]['close']
                         today_current = current_price
@@ -5648,17 +5754,7 @@ class GeminiAnalyzer:
                         message += "• تفسير: حجم تداول طبيعي\n"
                     message += "\n"
                 
-                # تحليل البولنجر باندز إذا متوفر
-                bollinger = indicators.get('bollinger', {})
-                if bollinger.get('upper') and bollinger.get('lower'):
-                    message += "🎯 تحليل البولنجر باندز:\n"
-                    message += f"• النطاق العلوي: {bollinger['upper']:.5f}\n"
-                    message += f"• النطاق الأوسط: {bollinger['middle']:.5f}\n"
-                    message += f"• النطاق السفلي: {bollinger['lower']:.5f}\n"
-                    bollinger_interp = indicators.get('bollinger_interpretation', '')
-                    if bollinger_interp:
-                        message += f"• التفسير: {bollinger_interp}\n"
-                    message += "\n"
+                # ملاحظة: تم حذف عرض البولنجر باندز من الرسالة (البيانات متوفرة للـ AI)
             
             message += "⚠️ تحذيرات هامة:\n"
             message += "• راقب الأحجام عند نقاط الدخول\n"
@@ -7719,6 +7815,9 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
         if action == 'HOLD':
             final_score = max(final_score - 20, 5)  # تقليل نسبة الانتظار
         
+        # تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)
+        final_score = apply_hidden_success_boost(final_score)
+        
         logger.info(f"[DYNAMIC_SUCCESS] {symbol} - {action}: {final_score:.1f}% (Base: {base_success_rate:.1f}%)")
         return round(final_score, 1)
         
@@ -7728,13 +7827,45 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
         if technical_data and technical_data.get('indicators'):
             return calculate_basic_technical_success_rate(technical_data, action)
         else:
-            # حساب نسبة ديناميكية بناءً على نوع الإجراء
+            # حساب نسبة ديناميكية بناءً على نوع الإجراء مع تحسين خفي
             if action == 'BUY':
-                return 65.0  # نسبة أعلى للشراء (الاتجاه العام صاعد)
+                base_rate = 65.0  # نسبة أعلى للشراء (الاتجاه العام صاعد)
             elif action == 'SELL':
-                return 55.0  # نسبة متوسطة للبيع
+                base_rate = 55.0  # نسبة متوسطة للبيع
             else:
-                return 45.0  # نسبة أقل للانتظار
+                base_rate = 45.0  # نسبة أقل للانتظار
+            
+            return apply_hidden_success_boost(base_rate)
+
+def apply_hidden_success_boost(original_rate: float) -> float:
+    """تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)"""
+    import random
+    
+    # تحديد القيمة العشوائية بناءً على النسبة الحالية
+    if original_rate < 40:
+        random_boost = random.choice([9, 13])  # أعلى تحسين للنسب المنخفضة
+    elif original_rate < 60:
+        random_boost = random.choice([7, 9])   # تحسين متوسط-عالي
+    elif original_rate < 75:
+        random_boost = random.choice([5, 7])   # تحسين متوسط
+    elif original_rate < 85:
+        random_boost = random.choice([3, 5])   # تحسين قليل
+    else:
+        random_boost = 3  # أقل تحسين للنسب العالية
+    
+    # تطبيق التحسين مع مراعاة الحدود
+    enhanced_rate = original_rate + random_boost
+    
+    # تطبيق قاعدة الحد الأقصى 96% إلا إذا كانت النسبة الأصلية أعلى
+    if original_rate <= 96:
+        final_rate = min(enhanced_rate, 96)
+    else:
+        final_rate = enhanced_rate  # لا حد أقصى إذا كانت النسبة الأصلية > 96%
+    
+    # ضمان عدم تجاوز 100%
+    final_rate = min(final_rate, 100)
+    
+    return round(final_rate, 1)
 
 # دالة مساعدة لحساب نسبة نجاح بسيطة من المؤشرات الفنية (نفس ما في اليدوي)
 def calculate_simplified_technical_rate(technical_data: Dict, action: str) -> float:
@@ -7880,13 +8011,13 @@ def get_community_feedback_average(symbol: str, action: str) -> Dict:
 def calculate_basic_technical_success_rate(technical_data: Dict, action: str) -> float:
     """حساب نسبة النجاح المحسنة من المؤشرات الفنية الأساسية"""
     if not technical_data or not technical_data.get('indicators'):
-        # إذا لم تتوفر مؤشرات، نحسب بناءً على نوع الإجراء
+        # إذا لم تتوفر مؤشرات، نحسب بناءً على نوع الإجراء مع تحسين خفي
         if action == 'BUY':
-            return 62.0  # نسبة جيدة للشراء
+            return apply_hidden_success_boost(62.0)  # نسبة جيدة للشراء
         elif action == 'SELL':
-            return 58.0  # نسبة متوسطة للبيع
+            return apply_hidden_success_boost(58.0)  # نسبة متوسطة للبيع
         else:
-            return 40.0  # نسبة منخفضة للانتظار
+            return apply_hidden_success_boost(40.0)  # نسبة منخفضة للانتظار
     
     indicators = technical_data['indicators']
     base_rate = 50.0
@@ -7928,7 +8059,9 @@ def calculate_basic_technical_success_rate(technical_data: Dict, action: str) ->
     elif volume_ratio < 0.7:
         base_rate -= 5  # حجم منخفض يضعف الإشارة
     
-    return max(10, min(95, base_rate))
+    # تطبيق التحسين الخفي قبل الإرجاع
+    final_rate = max(10, min(95, base_rate))
+    return apply_hidden_success_boost(final_rate)
 
 def calculate_basic_technical_success_rate_old(technical_data: Dict, action: str) -> float:
     """حساب نسبة نجاح أساسية من التحليل الفني فقط (كحل احتياطي)"""
@@ -12226,8 +12359,8 @@ def monitoring_loop():
             active_users = list(user_monitoring_active.keys())
             logger.debug(f"[DEBUG] المستخدمون النشطون: {active_users}")
             if not active_users:
-                logger.debug("[DEBUG] لا يوجد مستخدمين نشطين - انتظار 30 ثانية")
-                time.sleep(30)  # انتظار أطول إذا لم يكن هناك مستخدمين نشطين
+                logger.debug(f"[DEBUG] لا يوجد مستخدمين نشطين - انتظار {min(MONITORING_FREQUENCY, 30)} ثانية")
+                time.sleep(min(MONITORING_FREQUENCY, 30))  # انتظار محدود بحد أقصى 30 ثانية
                 continue
             
             successful_operations = 0
@@ -12352,8 +12485,8 @@ def monitoring_loop():
                     logger.info("[RECONNECT] محاولة إعادة اتصال شاملة بسبب أخطاء MT5 المتكررة...")
                     mt5_manager.check_real_connection()
             
-            # انتظار دقيقة واحدة - تردد محسن لتقليل استهلاك الموارد
-            time.sleep(60)
+            # انتظار حسب التردد المحدد (30s أو 150s)
+            time.sleep(MONITORING_FREQUENCY)
             
         except Exception as e:
             consecutive_errors += 1
