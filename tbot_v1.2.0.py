@@ -81,6 +81,9 @@ except ImportError:
 # متغير للتحكم في حلقة المراقبة
 monitoring_active = False
 
+# متغير لتردد المراقبة (بالثواني)
+MONITORING_FREQUENCY = 30  # التردد الافتراضي 30 ثانية
+
 # إضافة locks لتجنب التضارب في عمليات MT5
 import threading
 mt5_operation_lock = threading.RLock()  # RLock للسماح بإعادة الاستخدام من نفس الـ thread
@@ -5648,17 +5651,7 @@ class GeminiAnalyzer:
                         message += "• تفسير: حجم تداول طبيعي\n"
                     message += "\n"
                 
-                # تحليل البولنجر باندز إذا متوفر
-                bollinger = indicators.get('bollinger', {})
-                if bollinger.get('upper') and bollinger.get('lower'):
-                    message += "🎯 تحليل البولنجر باندز:\n"
-                    message += f"• النطاق العلوي: {bollinger['upper']:.5f}\n"
-                    message += f"• النطاق الأوسط: {bollinger['middle']:.5f}\n"
-                    message += f"• النطاق السفلي: {bollinger['lower']:.5f}\n"
-                    bollinger_interp = indicators.get('bollinger_interpretation', '')
-                    if bollinger_interp:
-                        message += f"• التفسير: {bollinger_interp}\n"
-                    message += "\n"
+                # ملاحظة: تم حذف عرض البولنجر باندز من الرسالة (البيانات متوفرة للـ AI)
             
             message += "⚠️ تحذيرات هامة:\n"
             message += "• راقب الأحجام عند نقاط الدخول\n"
