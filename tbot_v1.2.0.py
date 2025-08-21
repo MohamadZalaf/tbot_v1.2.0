@@ -845,46 +845,7 @@ def handle_renew_api_context_command(message):
         logger.error(f"[RENEW_API_CONTEXT] خطأ في معالجة أمر تجديد السياق: {e}")
         bot.reply_to(message, f"❌ خطأ في معالجة الأمر: {str(e)}")
 
-@bot.message_handler(commands=['switch_hz'])
-@require_authentication
-def handle_switch_hz_command(message):
-    """معالج أمر تغيير تردد المراقبة بين 30s و 150s"""
-    global MONITORING_FREQUENCY
-    try:
-        user_id = message.from_user.id
-        logger.info(f"[SWITCH_HZ] المستخدم {user_id} طلب تغيير تردد المراقبة")
-        
-        # التبديل بين التردد الحالي
-        if MONITORING_FREQUENCY == 30:
-            # تغيير إلى 150 ثانية (2.5 دقيقة)
-            MONITORING_FREQUENCY = 150
-            new_frequency_text = "150 ثانية (2.5 دقيقة) ⏰"
-            frequency_description = "مراقبة متوسطة لتوفير الموارد"
-        else:
-            # تغيير إلى 30 ثانية
-            MONITORING_FREQUENCY = 30
-            new_frequency_text = "30 ثانية ⚡"
-            frequency_description = "مراقبة مكثفة للفرص السريعة"
-        
-        response_message = f"""
-✅ **تم تغيير تردد المراقبة بنجاح!**
 
-🔄 **التردد الجديد:** {new_frequency_text}
-📊 **الوصف:** {frequency_description}
-
-📋 **أوضاع التردد المتاحة:**
-• 30 ثانية ⚡: مراقبة سريعة ومكثفة
-• 150 ثانية ⏰: مراقبة متوسطة وموفرة للموارد
-
-⚠️ **ملاحظة:** التغيير سيؤثر على جميع دورات المراقبة القادمة
-        """
-        
-        bot.reply_to(message, response_message.strip(), parse_mode='Markdown')
-        logger.info(f"[SWITCH_HZ] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية للمستخدم {user_id}")
-        
-    except Exception as e:
-        logger.error(f"[ERROR] خطأ في أمر تغيير التردد: {e}")
-        bot.reply_to(message, f"❌ خطأ في تغيير تردد المراقبة: {str(e)}")
 
 # دوال حساب النقاط المحسنة - منسوخة من التحليل الآلي الصحيح
 def get_asset_type_and_pip_size(symbol):
@@ -1814,6 +1775,54 @@ def require_authentication(func):
         
         return func(message_or_call)
     return wrapper
+
+@bot.message_handler(commands=['switch_hz'])
+def handle_switch_hz_command(message):
+    """معالج أمر تغيير تردد المراقبة بين 30s و 150s - للمطور فقط"""
+    global MONITORING_FREQUENCY
+    try:
+        user_id = message.from_user.id
+        DEVELOPER_ID = 6891599955  # ID المطور الفعلي
+        
+        # التحقق من أن المستخدم هو المطور
+        if user_id != DEVELOPER_ID:
+            bot.reply_to(message, "❌ هذا الأمر متاح للمطور فقط")
+            return
+            
+        logger.info(f"[SWITCH_HZ] المطور {user_id} طلب تغيير تردد المراقبة")
+        
+        # التبديل بين التردد الحالي
+        if MONITORING_FREQUENCY == 30:
+            # تغيير إلى 150 ثانية (2.5 دقيقة)
+            MONITORING_FREQUENCY = 150
+            new_frequency_text = "150 ثانية (2.5 دقيقة) ⏰"
+            frequency_description = "مراقبة متوسطة لتوفير الموارد"
+        else:
+            # تغيير إلى 30 ثانية
+            MONITORING_FREQUENCY = 30
+            new_frequency_text = "30 ثانية ⚡"
+            frequency_description = "مراقبة مكثفة للفرص السريعة"
+        
+        response_message = f"""
+✅ **تم تغيير تردد المراقبة بنجاح!**
+
+🔄 **التردد الجديد:** {new_frequency_text}
+📊 **الوصف:** {frequency_description}
+
+📋 **أوضاع التردد المتاحة:**
+• 30 ثانية ⚡: مراقبة سريعة ومكثفة
+• 150 ثانية ⏰: مراقبة متوسطة وموفرة للموارد
+
+⚠️ **ملاحظة:** التغيير سيؤثر على جميع دورات المراقبة القادمة
+        """
+        
+        bot.reply_to(message, response_message.strip(), parse_mode='Markdown')
+        logger.info(f"[SWITCH_HZ] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية بواسطة المطور")
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في أمر تغيير التردد: {e}")
+        bot.reply_to(message, f"❌ خطأ في تغيير تردد المراقبة: {str(e)}")
+
 user_selected_symbols = {}  # الرموز المختارة للمراقبة
 user_current_category = {}  # الفئة الحالية لكل مستخدم لتحديث القائمة
 user_trade_feedbacks = {}  # تقييمات المستخدمين للصفقات
