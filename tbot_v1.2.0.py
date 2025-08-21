@@ -3403,6 +3403,375 @@ class MT5Manager:
 # إنشاء مثيل مدير MT5
 mt5_manager = MT5Manager()
 
+# ===== دالة حساب المؤشرات على فريمات متعددة =====
+def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
+    """حساب المؤشرات الفنية على فريمات زمنية متعددة (M5, M15, M30, M60)"""
+    try:
+        if not mt5_manager.connected:
+            logger.warning(f"[WARNING] MT5 غير متصل - لا يمكن حساب المؤشرات لـ {symbol}")
+            return {}
+        
+        # التأكد من أن الاتصال حقيقي
+        if not mt5_manager.check_real_connection():
+            logger.warning(f"[WARNING] اتصال MT5 غير مستقر - لا يمكن حساب المؤشرات لـ {symbol}")
+            return {}
+        
+        timeframes = {
+            'M5': mt5.TIMEFRAME_M5,
+            'M15': mt5.TIMEFRAME_M15,
+            'M30': mt5.TIMEFRAME_M30,
+            'M60': mt5.TIMEFRAME_H1
+        }
+        
+        multi_tf_indicators = {}
+        
+        for tf_name, tf_value in timeframes.items():
+            try:
+                logger.info(f"[MULTI_TF] حساب المؤشرات للرمز {symbol} على إطار {tf_name}")
+                
+                # جلب البيانات للإطار الزمني المحدد
+                with mt5_operation_lock:
+                    df = mt5_manager.get_market_data(symbol, tf_value, 100)
+                
+                if df is None or len(df) < 20:
+                    logger.warning(f"[WARNING] بيانات غير كافية للرمز {symbol} على إطار {tf_name}")
+                    multi_tf_indicators[tf_name] = {}
+                    continue
+                
+                # حساب المؤشرات لهذا الإطار الزمني
+                indicators = {}
+                
+                # RSI
+                try:
+                    if len(df) >= 14:
+                        import ta
+                        rsi = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+                        current_rsi = rsi.iloc[-1] if not rsi.empty else None
+                        
+                        if current_rsi and not pd.isna(current_rsi):
+                            indicators['rsi'] = round(float(current_rsi), 1)
+                            
+                            # تفسير RSI
+                            if current_rsi <= 30:
+                                indicators['rsi_interpretation'] = 'ذروة بيع - فرصة شراء'
+                            elif current_rsi >= 70:
+                                indicators['rsi_interpretation'] = 'ذروة شراء - فرصة بيع'
+                            elif 40 <= current_rsi <= 60:
+                                indicators['rsi_interpretation'] = 'محايد'
+                            elif current_rsi < 40:
+                                indicators['rsi_interpretation'] = 'ضعيف'
+                            else:
+                                indicators['rsi_interpretation'] = 'قوي'
+                        else:
+                            indicators['rsi'] = None
+                            indicators['rsi_interpretation'] = 'غير متوفر'
+                    else:
+                        indicators['rsi'] = None
+                        indicators['rsi_interpretation'] = 'بيانات غير كافية'
+                except Exception as e:
+                    logger.warning(f"[WARNING] فشل في حساب RSI للرمز {symbol} على إطار {tf_name}: {e}")
+                    indicators['rsi'] = None
+                    indicators['rsi_interpretation'] = 'خطأ في الحساب'
+                
+                # MACD
+                try:
+                    if len(df) >= 26:
+                        macd_line = df['close'].ewm(span=12).mean() - df['close'].ewm(span=26).mean()
+                        signal_line = macd_line.ewm(span=9).mean()
+                        
+                        current_macd = macd_line.iloc[-1] if not macd_line.empty else None
+                        current_signal = signal_line.iloc[-1] if not signal_line.empty else None
+                        
+                        if current_macd is not None and current_signal is not None and not pd.isna(current_macd) and not pd.isna(current_signal):
+                            indicators['macd'] = {
+                                'macd': round(float(current_macd), 6),
+                                'signal': round(float(current_signal), 6)
+                            }
+                            
+                            # تفسير MACD
+                            if current_macd > current_signal:
+                                if current_macd > 0:
+                                    indicators['macd_interpretation'] = 'إشارة صعود قوية'
+                                else:
+                                    indicators['macd_interpretation'] = 'إشارة صعود'
+                            else:
+                                if current_macd < 0:
+                                    indicators['macd_interpretation'] = 'إشارة هبوط قوية'
+                                else:
+                                    indicators['macd_interpretation'] = 'إشارة هبوط'
+                        else:
+                            indicators['macd'] = {'macd': None, 'signal': None}
+                            indicators['macd_interpretation'] = 'غير متوفر'
+                    else:
+                        indicators['macd'] = {'macd': None, 'signal': None}
+                        indicators['macd_interpretation'] = 'بيانات غير كافية'
+                except Exception as e:
+                    logger.warning(f"[WARNING] فشل في حساب MACD للرمز {symbol} على إطار {tf_name}: {e}")
+                    indicators['macd'] = {'macd': None, 'signal': None}
+                    indicators['macd_interpretation'] = 'خطأ في الحساب'
+                
+                # المتوسطات المتحركة
+                try:
+                    for period in [9, 21]:
+                        if len(df) >= period:
+                            ma = df['close'].rolling(window=period).mean()
+                            current_ma = ma.iloc[-1] if not ma.empty else None
+                            
+                            if current_ma and not pd.isna(current_ma):
+                                indicators[f'ma_{period}'] = round(float(current_ma), 5)
+                            else:
+                                indicators[f'ma_{period}'] = None
+                        else:
+                            indicators[f'ma_{period}'] = None
+                except Exception as e:
+                    logger.warning(f"[WARNING] فشل في حساب المتوسطات المتحركة للرمز {symbol} على إطار {tf_name}: {e}")
+                    indicators['ma_9'] = None
+                    indicators['ma_21'] = None
+                
+                # Stochastic Oscillator
+                try:
+                    if len(df) >= 14:
+                        high_14 = df['high'].rolling(window=14).max()
+                        low_14 = df['low'].rolling(window=14).min()
+                        k_percent = 100 * ((df['close'] - low_14) / (high_14 - low_14))
+                        d_percent = k_percent.rolling(window=3).mean()
+                        
+                        current_k = k_percent.iloc[-1] if not k_percent.empty else None
+                        current_d = d_percent.iloc[-1] if not d_percent.empty else None
+                        
+                        if current_k is not None and current_d is not None and not pd.isna(current_k) and not pd.isna(current_d):
+                            indicators['stochastic'] = {
+                                'k': round(float(current_k), 1),
+                                'd': round(float(current_d), 1)
+                            }
+                            
+                            # تفسير Stochastic
+                            if current_k >= 80 and current_d >= 80:
+                                if current_k < current_d:
+                                    indicators['stochastic_interpretation'] = 'تقاطع هابط - إشارة بيع محتملة | ذروة شراء قوية - احتمالية تصحيح'
+                                else:
+                                    indicators['stochastic_interpretation'] = 'ذروة شراء قوية - احتمالية تصحيح'
+                            elif current_k <= 20 and current_d <= 20:
+                                if current_k > current_d:
+                                    indicators['stochastic_interpretation'] = 'تقاطع صاعد - إشارة شراء محتملة | ذروة بيع قوية - احتمالية ارتداد'
+                                else:
+                                    indicators['stochastic_interpretation'] = 'ذروة بيع قوية - احتمالية ارتداد'
+                            else:
+                                indicators['stochastic_interpretation'] = 'منطقة متوسطة - إشارة محايدة'
+                        else:
+                            indicators['stochastic'] = {'k': None, 'd': None}
+                            indicators['stochastic_interpretation'] = 'غير متوفر'
+                    else:
+                        indicators['stochastic'] = {'k': None, 'd': None}
+                        indicators['stochastic_interpretation'] = 'بيانات غير كافية'
+                except Exception as e:
+                    logger.warning(f"[WARNING] فشل في حساب Stochastic للرمز {symbol} على إطار {tf_name}: {e}")
+                    indicators['stochastic'] = {'k': None, 'd': None}
+                    indicators['stochastic_interpretation'] = 'خطأ في الحساب'
+                
+                # ATR
+                try:
+                    if len(df) >= 14:
+                        high_low = df['high'] - df['low']
+                        high_close = np.abs(df['high'] - df['close'].shift())
+                        low_close = np.abs(df['low'] - df['close'].shift())
+                        
+                        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                        atr = true_range.rolling(window=14).mean()
+                        
+                        current_atr = atr.iloc[-1] if not atr.empty else None
+                        
+                        if current_atr and not pd.isna(current_atr):
+                            indicators['atr'] = round(float(current_atr), 5)
+                        else:
+                            indicators['atr'] = None
+                    else:
+                        indicators['atr'] = None
+                except Exception as e:
+                    logger.warning(f"[WARNING] فشل في حساب ATR للرمز {symbol} على إطار {tf_name}: {e}")
+                    indicators['atr'] = None
+                
+                # Volume Analysis
+                try:
+                    if 'tick_volume' in df.columns and len(df) > 0:
+                        current_volume = df['tick_volume'].iloc[-1]
+                        
+                        if pd.isna(current_volume) or current_volume <= 0:
+                            if 'real_volume' in df.columns:
+                                current_volume = df['real_volume'].iloc[-1]
+                                if pd.isna(current_volume) or current_volume <= 0:
+                                    current_volume = 1000  # قيمة افتراضية
+                        
+                        indicators['current_volume'] = int(current_volume) if current_volume else 1000
+                        
+                        # حساب متوسط الحجم
+                        if len(df) >= 20:
+                            valid_volumes = df['tick_volume'][df['tick_volume'] > 0].dropna()
+                            if len(valid_volumes) >= 10:
+                                avg_volume = valid_volumes.rolling(window=min(20, len(valid_volumes))).mean().iloc[-1]
+                                indicators['avg_volume'] = int(avg_volume) if avg_volume and not pd.isna(avg_volume) else indicators['current_volume']
+                            else:
+                                indicators['avg_volume'] = indicators['current_volume']
+                        else:
+                            indicators['avg_volume'] = indicators['current_volume']
+                        
+                        # حساب نسبة الحجم
+                        if indicators['avg_volume'] > 0:
+                            indicators['volume_ratio'] = round(indicators['current_volume'] / indicators['avg_volume'], 2)
+                        else:
+                            indicators['volume_ratio'] = 1.0
+                        
+                        # تفسير الحجم
+                        volume_ratio = indicators['volume_ratio']
+                        if volume_ratio > 2.0:
+                            indicators['volume_interpretation'] = 'حجم استثنائي - اهتمام كبير'
+                            indicators['activity_level'] = '🔥 استثنائي - اهتمام كبير جداً'
+                        elif volume_ratio > 1.5:
+                            indicators['volume_interpretation'] = 'حجم عالي - نشاط قوي'
+                            indicators['activity_level'] = '⚡ عالي - نشاط متزايد'
+                        elif volume_ratio > 1.2:
+                            indicators['volume_interpretation'] = 'حجم جيد - نشاط طبيعي مرتفع'
+                            indicators['activity_level'] = '✅ جيد - نشاط طبيعي مرتفع'
+                        elif volume_ratio < 0.3:
+                            indicators['volume_interpretation'] = 'حجم منخفض جداً - ضعف اهتمام'
+                            indicators['activity_level'] = '🔴 منخفض جداً - ضعف اهتمام'
+                        elif volume_ratio < 0.7:
+                            indicators['volume_interpretation'] = 'حجم منخفض - نشاط محدود'
+                            indicators['activity_level'] = '⚠️ منخفض - نشاط محدود'
+                        else:
+                            indicators['volume_interpretation'] = 'حجم طبيعي'
+                            indicators['activity_level'] = '📊 طبيعي - نشاط عادي'
+                    else:
+                        indicators['current_volume'] = 1000
+                        indicators['avg_volume'] = 1000
+                        indicators['volume_ratio'] = 1.0
+                        indicators['volume_interpretation'] = 'بيانات الحجم غير متوفرة'
+                        indicators['activity_level'] = '❓ غير محدد'
+                except Exception as e:
+                    logger.warning(f"[WARNING] فشل في حساب الحجم للرمز {symbol} على إطار {tf_name}: {e}")
+                    indicators['current_volume'] = 1000
+                    indicators['avg_volume'] = 1000
+                    indicators['volume_ratio'] = 1.0
+                    indicators['volume_interpretation'] = 'خطأ في حساب الحجم'
+                    indicators['activity_level'] = '❓ غير محدد'
+                
+                multi_tf_indicators[tf_name] = indicators
+                logger.info(f"[SUCCESS] تم حساب المؤشرات للرمز {symbol} على إطار {tf_name}")
+                
+            except Exception as e:
+                logger.error(f"[ERROR] خطأ في حساب المؤشرات للرمز {symbol} على إطار {tf_name}: {e}")
+                multi_tf_indicators[tf_name] = {}
+        
+        return multi_tf_indicators
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ عام في حساب المؤشرات متعددة الإطارات للرمز {symbol}: {e}")
+        return {}
+
+def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, multi_tf_indicators: Dict) -> str:
+    """تنسيق رسالة المؤشرات الفنية متعددة الإطارات"""
+    try:
+        message = f"📊 **المؤشرات الفنية - {symbol_info['name']} {symbol_info['emoji']}**\n\n"
+        
+        timeframe_names = {
+            'M5': '5 دقائق',
+            'M15': '15 دقيقة', 
+            'M30': '30 دقيقة',
+            'M60': '60 دقيقة'
+        }
+        
+        for tf_key, tf_name in timeframe_names.items():
+            indicators = multi_tf_indicators.get(tf_key, {})
+            
+            message += f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            message += f"⏰ **{tf_name} Frame**\n\n"
+            
+            if indicators:
+                # RSI
+                rsi = indicators.get('rsi')
+                rsi_interpretation = indicators.get('rsi_interpretation', 'غير متوفر')
+                if rsi is not None:
+                    message += f"• RSI: {rsi:.1f} ({rsi_interpretation})\n"
+                else:
+                    message += f"• RSI: -- ({rsi_interpretation})\n"
+                
+                # MACD
+                macd_data = indicators.get('macd', {})
+                macd_interpretation = indicators.get('macd_interpretation', 'غير متوفر')
+                if macd_data.get('macd') is not None:
+                    message += f"• MACD: {macd_data['macd']:.6f} ({macd_interpretation})\n"
+                else:
+                    message += f"• MACD: -- ({macd_interpretation})\n"
+                
+                # المتوسطات المتحركة
+                ma9 = indicators.get('ma_9')
+                ma21 = indicators.get('ma_21')
+                
+                if ma9 is not None:
+                    message += f"• MA9: {ma9:.5f}\n"
+                else:
+                    message += f"• MA9: --\n"
+                
+                if ma21 is not None:
+                    message += f"• MA21: {ma21:.5f}\n"
+                else:
+                    message += f"• MA21: --\n"
+                
+                # Stochastic
+                stochastic = indicators.get('stochastic', {})
+                stoch_interpretation = indicators.get('stochastic_interpretation', 'غير متوفر')
+                if stochastic.get('k') is not None and stochastic.get('d') is not None:
+                    message += f"• Stochastic %K: {stochastic['k']:.1f}, %D: {stochastic['d']:.1f} ({stoch_interpretation})\n"
+                else:
+                    message += f"• Stochastic: -- ({stoch_interpretation})\n"
+                
+                # ATR
+                atr = indicators.get('atr')
+                if atr is not None:
+                    message += f"• ATR: {atr:.5f} (التقلبات)\n"
+                else:
+                    message += f"• ATR: -- (غير متوفر)\n"
+                
+                # Volume
+                current_volume = indicators.get('current_volume')
+                avg_volume = indicators.get('avg_volume')
+                volume_ratio = indicators.get('volume_ratio')
+                volume_interpretation = indicators.get('volume_interpretation', 'غير متوفر')
+                activity_level = indicators.get('activity_level', '❓ غير محدد')
+                
+                if current_volume is not None:
+                    message += f"• الحجم الحالي: {current_volume:,}\n"
+                else:
+                    message += f"• الحجم الحالي: --\n"
+                
+                if avg_volume is not None:
+                    message += f"• متوسط الحجم (20): {avg_volume:,}\n"
+                else:
+                    message += f"• متوسط الحجم (20): --\n"
+                
+                if volume_ratio is not None:
+                    message += f"• نسبة الحجم: {volume_ratio:.2f}x\n"
+                else:
+                    message += f"• نسبة الحجم: --\n"
+                
+                message += f"• تحليل الحجم: {volume_interpretation}\n"
+                message += f"• مستوى النشاط: {activity_level}\n"
+                
+            else:
+                message += "• لا توجد بيانات متوفرة لهذا الإطار الزمني\n"
+            
+            message += "\n"
+        
+        message += "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        message += f"🕐 **وقت التحديث:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        message += "📡 **المصدر:** MetaTrader5 (بيانات حقيقية)\n"
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في تنسيق رسالة المؤشرات متعددة الإطارات: {e}")
+        return f"❌ خطأ في عرض المؤشرات الفنية للرمز {symbol}"
+
 # ===== نظام تتبع التقاطعات التاريخية =====
 class CrossoverTracker:
     """نظام تتبع وتحليل التقاطعات التاريخية لتحسين دقة التنبؤات"""
@@ -3644,15 +4013,23 @@ class GeminiAnalyzer:
         return None
 
     def _analyze_with_full_manual_instructions(self, symbol: str, price_data: Dict, technical_data: Dict, user_id: int) -> str:
-        """تحليل شامل باستخدام نفس التعليمات المفصلة للوضع اليدوي - موحد تماماً"""
+        """تحليل شامل باستخدام نفس التعليمات المفصلة للوضع اليدوي - موحد تماماً مع المؤشرات متعددة الإطارات"""
         try:
             # الحصول على بيانات المستخدم - نفس ما في اليدوي
             trading_mode = get_user_trading_mode(user_id) if user_id else 'scalping'
             capital = get_user_capital(user_id) if user_id else 1000
             timezone_str = get_user_timezone(user_id) if user_id else 'UTC'
             
-            # تحضير البيانات الفنية للعرض
-            indicators_text = self._format_technical_indicators(technical_data, symbol)
+            # تحضير المؤشرات الفنية متعددة الإطارات للتحليل الشامل
+            try:
+                logger.info(f"[AI_INDICATORS] جلب المؤشرات متعددة الإطارات للرمز {symbol}")
+                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+                indicators_text = self._format_multi_timeframe_indicators_for_ai(symbol, multi_tf_indicators)
+                logger.info(f"[AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للرمز {symbol}")
+            except Exception as indicators_error:
+                logger.error(f"[AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
+                # fallback للمؤشرات القديمة
+                indicators_text = self._format_technical_indicators(technical_data, symbol)
             
             # بناء الـ prompt الشامل (نفس ما في الوضع اليدوي)
             current_price = price_data.get('last', price_data.get('bid', 0))
@@ -5620,107 +5997,7 @@ class GeminiAnalyzer:
             message += f"📊 نسبة المخاطرة/المكافأة: 1:{risk_reward_ratio:.1f}\n"
             message += f"✅ نسبة نجاح الصفقة: {ai_success_rate:.0f}%\n\n"
             
-            message += "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            message += "🔧 التحليل الفني المتقدم\n\n"
-            
-            # المؤشرات الفنية الحقيقية
-            message += "📈 المؤشرات الفنية:\n"
-            
-            if indicators:
-                # RSI
-                rsi = indicators.get('rsi')
-                if rsi and rsi > 0:
-                    rsi_status = indicators.get('rsi_interpretation', 'محايد')
-                    message += f"• RSI: {rsi:.1f} ({rsi_status})\n"
-                else:
-                    message += f"• RSI: --\n"
-                
-                # MACD
-                macd_data = indicators.get('macd', {})
-                if macd_data and macd_data.get('macd') is not None:
-                    macd_value = macd_data.get('macd', 0)
-                    macd_status = indicators.get('macd_interpretation', 'محايد')
-                    message += f"• MACD: {macd_value:.4f} ({macd_status})\n"
-                else:
-                    message += f"• MACD: --\n"
-                
-                # المتوسطات المتحركة - عرض MA9 و MA21 فقط
-                ma9 = indicators.get('ma_9')
-                ma21 = indicators.get('ma_21')
-                
-                if ma9 and ma9 > 0:
-                    message += f"• MA9: {ma9:.5f}\n"
-                else:
-                    message += f"• MA9: --\n"
-                
-                if ma21 and ma21 > 0:
-                    message += f"• MA21: {ma21:.5f}\n"
-                else:
-                    message += f"• MA21: --\n"
-                
-                # Stochastic Oscillator
-                stochastic = indicators.get('stochastic', {})
-                if stochastic and stochastic.get('k') is not None:
-                    k_value = stochastic.get('k', 0)
-                    d_value = stochastic.get('d', 0)
-                    stoch_status = indicators.get('stochastic_interpretation', 'محايد')
-                    message += f"• Stochastic %K: {k_value:.1f}, %D: {d_value:.1f} ({stoch_status})\n"
-                else:
-                    message += f"• Stochastic: --\n"
-                
-                # ATR
-                atr = indicators.get('atr')
-                if atr and atr > 0:
-                    message += f"• ATR: {atr:.5f} (التقلبات)\n"
-                else:
-                    message += f"• ATR: --\n"
-                
-                # Volume Analysis - محسن للعرض المفصل
-                current_volume = indicators.get('current_volume')
-                avg_volume = indicators.get('avg_volume')
-                volume_ratio = indicators.get('volume_ratio')
-                volume_interpretation = indicators.get('volume_interpretation')
-                
-                if current_volume and avg_volume and volume_ratio:
-                    message += f"• الحجم الحالي: {current_volume:,.0f}\n"
-                    message += f"• متوسط الحجم (20): {avg_volume:,.0f}\n"
-                    message += f"• نسبة الحجم: {volume_ratio:.2f}x\n"
-                    
-                    # عرض تفسير الحجم المفصل
-                    if volume_interpretation:
-                        message += f"• تحليل الحجم: {volume_interpretation}\n"
-                    
-                    # إضافة تقييم بصري للحجم
-                    if volume_ratio > 2.0:
-                        message += f"• مستوى النشاط: 🔥 استثنائي - اهتمام كبير جداً\n"
-                    elif volume_ratio > 1.5:
-                        message += f"• مستوى النشاط: ⚡ عالي - نشاط متزايد\n"
-                    elif volume_ratio > 1.2:
-                        message += f"• مستوى النشاط: ✅ جيد - نشاط طبيعي مرتفع\n"
-                    elif volume_ratio < 0.3:
-                        message += f"• مستوى النشاط: 🔴 منخفض جداً - ضعف اهتمام\n"
-                    elif volume_ratio < 0.7:
-                        message += f"• مستوى النشاط: ⚠️ منخفض - نشاط محدود\n"
-                    else:
-                        message += f"• مستوى النشاط: 📊 طبيعي - نشاط عادي\n"
-                        
-                elif current_volume:
-                    message += f"• الحجم الحالي: {current_volume:,.0f}\n"
-                    message += f"• تحليل الحجم: بيانات محدودة - لا يتوفر متوسط\n"
-                else:
-                    message += f"• الحجم: غير متوفر - تحقق من اتصال البيانات\n"
-                
-            else:
-                message += f"• RSI: --\n"
-                message += f"• MACD: --\n"
-                message += f"• MA9: --\n"
-                message += f"• MA21: --\n"
-                message += f"• Stochastic: --\n"
-                message += f"• ATR: --\n"
-                message += f"• الحجم: --\n"
-                
-            
-            message += "\n"
+            # تم حذف قسم المؤشرات الفنية - سيتم إرساله في رسالة منفصلة
             
             message += "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             message += "📋 توصيات إدارة المخاطر\n\n"
@@ -9656,6 +9933,40 @@ def handle_single_symbol_analysis(call):
                     )
             
             logger.info(f"[SUCCESS] تم إرسال تحليل الرمز {symbol} للمستخدم {user_id}")
+            
+            # إرسال رسالة المؤشرات الفنية متعددة الإطارات بعد التحليل
+            try:
+                logger.info(f"[INDICATORS] بدء حساب المؤشرات متعددة الإطارات للرمز {symbol}")
+                
+                # حساب المؤشرات على الفريمات المختلفة
+                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+                
+                if multi_tf_indicators:
+                    # تنسيق رسالة المؤشرات
+                    indicators_message = format_multi_timeframe_indicators_message(symbol, symbol_info, multi_tf_indicators)
+                    
+                    # إرسال رسالة المؤشرات
+                    bot.send_message(
+                        chat_id=call.message.chat.id,
+                        text=indicators_message,
+                        parse_mode='Markdown'
+                    )
+                    
+                    logger.info(f"[SUCCESS] تم إرسال المؤشرات متعددة الإطارات للرمز {symbol}")
+                else:
+                    logger.warning(f"[WARNING] لا توجد مؤشرات متاحة للرمز {symbol}")
+                    
+            except Exception as indicators_error:
+                logger.error(f"[ERROR] فشل في إرسال المؤشرات للرمز {symbol}: {indicators_error}")
+                # إرسال رسالة خطأ بسيطة للمؤشرات
+                try:
+                    bot.send_message(
+                        chat_id=call.message.chat.id,
+                        text=f"⚠️ **تعذر جلب المؤشرات الفنية للرمز {symbol}**\n\nسبب الخطأ: مشكلة في الاتصال بـ MetaTrader5 أو نقص البيانات.",
+                        parse_mode='Markdown'
+                    )
+                except:
+                    pass  # تجاهل خطأ إرسال رسالة الخطأ
             
         except Exception as send_error:
             logger.error(f"[ERROR] فشل في إرسال التحليل: {send_error}")
