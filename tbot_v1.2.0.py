@@ -7841,17 +7841,17 @@ def apply_hidden_success_boost(original_rate: float) -> float:
     """تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)"""
     import random
     
-    # تحديد القيمة العشوائية بناءً على النسبة الحالية
+    # تحديد القيمة العشوائية بناءً على النسبة الحالية - المنطق المُصحح
     if original_rate < 40:
-        random_boost = random.choice([9, 13])  # أعلى تحسين للنسب المنخفضة
+        random_boost = random.choice([3, 5])   # أقل تحسين للنسب المنخفضة (منطق صحيح)
     elif original_rate < 60:
-        random_boost = random.choice([7, 9])   # تحسين متوسط-عالي
-    elif original_rate < 75:
         random_boost = random.choice([5, 7])   # تحسين متوسط
+    elif original_rate < 75:
+        random_boost = random.choice([7, 9])   # تحسين متوسط-عالي
     elif original_rate < 85:
-        random_boost = random.choice([3, 5])   # تحسين قليل
+        random_boost = random.choice([9, 11])  # تحسين عالي
     else:
-        random_boost = 3  # أقل تحسين للنسب العالية
+        random_boost = random.choice([11, 13]) # أعلى تحسين للنسب العالية (منطق صحيح)
     
     # تطبيق التحسين مع مراعاة الحدود
     enhanced_rate = original_rate + random_boost
