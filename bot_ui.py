@@ -736,6 +736,8 @@ class EmbeddedTradingBot:
 class TradingBotUI:
     def __init__(self):
         print("Initializing TradingBotUI...")
+        
+        # Initialize all required variables first
         self.embedded_bot = EmbeddedTradingBot(EMBEDDED_CONFIG)
         self.PASSWORD = "041768454"
         self.is_logged_in = False
@@ -746,10 +748,26 @@ class TradingBotUI:
         self.bot_process = None
         self.bot_output_thread = None
         
+        # Initialize UI components to None first
+        self.root = None
+        self.main_frame = None
+        self.login_frame = None
+        self.control_frame = None
+        self.small_icon = None
+        self.medium_icon = None
+        self.large_icon = None
+        
         # Initialize main window
         print("Setting up main window...")
         self.setup_main_window()
         print("Main window setup complete.")
+        
+        # Ensure main_frame exists
+        if not hasattr(self, 'main_frame') or self.main_frame is None:
+            print("ERROR: main_frame not created! Creating emergency main_frame...")
+            self.main_frame = tk.Frame(self.root, bg='#2b2b2b')
+            self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
         self.create_login_interface()
         self.create_control_interface()
         
@@ -786,6 +804,10 @@ class TradingBotUI:
         
         # Configure main style
         self.root.configure(bg='#2b2b2b')
+        
+        # Create main frame - MUST be created here to ensure it always exists
+        self.main_frame = tk.Frame(self.root, bg='#2b2b2b')
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
     
     def create_interface_icon(self):
         """Create small icon for interface use"""
@@ -813,13 +835,13 @@ class TradingBotUI:
             print(f"Failed to create interface icons: {e}")
             self.small_icon = None
             self.medium_icon = None
-        
-        # Create main frame
-        self.main_frame = tk.Frame(self.root, bg='#2b2b2b')
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
     
     def create_login_interface(self):
         """Create login interface"""
+        # Ensure main_frame exists before using it
+        if not hasattr(self, 'main_frame') or self.main_frame is None:
+            raise AttributeError("main_frame is not initialized. This indicates a problem in setup_main_window().")
+        
         self.login_frame = tk.Frame(self.main_frame, bg='#2b2b2b')
         
         # Bot icon and title
@@ -3566,16 +3588,36 @@ class TradingBotUI:
 if __name__ == "__main__":
     try:
         print("Starting Trading Bot UI...")
+        print("Creating TradingBotUI instance...")
         app = TradingBotUI()
         print("UI initialized successfully, starting main loop...")
         app.run()
     except KeyboardInterrupt:
         print("\n🛑 تم إنهاء التطبيق بواسطة المستخدم")
+    except AttributeError as e:
+        print(f"AttributeError in application: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            temp_root = tk.Tk()
+            temp_root.withdraw()
+            messagebox.showerror(
+                "خطأ في التطبيق", 
+                f"❌ حدث خطأ في التطبيق (AttributeError):\n\n'{str(e)}'\n\nهذا الخطأ عادة ما يحدث بسبب مشكلة في تهيئة الواجهة.\nيرجى التحقق من تفاصيل الخطأ والمحاولة مرة أخرى."
+            )
+            temp_root.destroy()
+        except:
+            # If even the error dialog fails, just print the error
+            print(f"Critical AttributeError: {e}")
     except Exception as e:
         print(f"Error starting application: {e}")
         import traceback
         traceback.print_exc()
         try:
+            import tkinter as tk
+            from tkinter import messagebox
             temp_root = tk.Tk()
             temp_root.withdraw()
             messagebox.showerror(
