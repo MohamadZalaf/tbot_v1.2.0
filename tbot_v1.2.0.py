@@ -1480,27 +1480,21 @@ RSI: {rsi:.1f}, MACD: {macd.get('macd', 0):.4f}, MA20: {ma_20:.5f}, MA50: {ma_50
                 # آخر حل: تفسير بسيط جداً بناءً على البيانات المتوفرة
                 ai_explanation = f"تحليل فني يشير لنسبة نجاح {confidence:.0f}% للاتجاه {trade_type}"
         
-        # تنسيق الرسالة المختصرة مع نفس متغيرات الرسالة الطويلة (ديناميكية 100%)
-        message = f"""📊 **صفقة مقترحة** {symbol_info['emoji']}
+        # تنسيق الرسالة المختصرة حسب التصميم المطلوب (ديناميكية 100%)
+        message = f"""📊 **صفقة مقترحة**
 
-**{symbol}** | {trade_type} | **{entry_price:.5f}**
-🎯 **TP1:** {points1:.0f}ن"""
+**الزوج:** {symbol}
+**نوع الصفقة:** {trade_type}
+**سعر الدخول:** {entry_price:.5f}
+**الهدف:** ({points1:.0f} نقطة)
+**وقف الخسارة:** (-{stop_points:.0f} نقطة)
+
+⏰ **الفريم:** {timeframe}
+📈 **نسبة النجاح المتوقعة:** {confidence:.0f}%"""
         
-        # إضافة الهدف الثاني إذا كان متوفراً
-        if points2 > 0:
-            message += f" | **TP2:** {points2:.0f}ن"
-        
-        message += f" | 🛑 **SL:** {stop_points:.0f}ن"
-        
-        # إضافة نسبة المخاطرة/المكافأة إذا كانت متوفرة
-        if risk_reward_ratio and risk_reward_ratio > 0:
-            message += f"\n📊 **R/R:** 1:{risk_reward_ratio:.1f}"
-        
-        message += f" | ✅ **{confidence:.0f}%**"
-        
-        # إضافة تفسير AI المختصر
+        # إضافة تفسير AI المختصر للتقاطعات في الفريم M15
         if ai_explanation:
-            message += f"\n\n💡 **{timeframe}:** {ai_explanation}"
+            message += f"\n💡 **السبب:** {ai_explanation}"
         
         return message
         
@@ -7588,14 +7582,9 @@ class GeminiAnalyzer:
             try:
                 logger.info(f"[AUTO_AI_INDICATORS] جلب المؤشرات متعددة الإطارات للتحليل الآلي للرمز {symbol}")
                 multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
-                # استخدام المؤشرات من الفريم M15 كأساس (حسب طلب المستخدم)
-                if multi_tf_indicators and 'M15' in multi_tf_indicators:
-                    indicators = multi_tf_indicators['M15'].get('indicators', {})
-                    logger.info(f"[AUTO_AI_INDICATORS] تم استخدام مؤشرات M15 للتحليل الخلفي للرمز {symbol}")
-                else:
-                    # fallback للمؤشرات القديمة
-                    indicators = technical_data.get('indicators', {}) if technical_data else {}
-                    logger.warning(f"[AUTO_AI_INDICATORS] استخدام المؤشرات الافتراضية للرمز {symbol}")
+                # استخدام المؤشرات الجديدة في التحليل الخلفي
+                indicators = self._consolidate_multi_tf_indicators_for_background_analysis(multi_tf_indicators)
+                logger.info(f"[AUTO_AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للتحليل الخلفي للرمز {symbol}")
             except Exception as indicators_error:
                 logger.error(f"[AUTO_AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
                 # fallback للمؤشرات القديمة
@@ -7628,6 +7617,34 @@ class GeminiAnalyzer:
             logger.error(f"[ENHANCED_BACKGROUND_ERROR] خطأ في التحليل الخلفي المحسن للرمز {symbol}: {e}")
         
         return {}
+    
+    def _consolidate_multi_tf_indicators_for_background_analysis(self, multi_tf_indicators: Dict) -> Dict:
+        """دمج المؤشرات متعددة الإطارات للتحليل الخلفي مع التركيز على M15"""
+        try:
+            if not multi_tf_indicators:
+                return {}
+            
+            # استخدام M15 كأساس (حسب طلب المستخدم)
+            base_indicators = multi_tf_indicators.get('M15', {}).get('indicators', {})
+            
+            # إضافة معلومات من الإطارات الأخرى لتعزيز التحليل
+            consolidated = base_indicators.copy()
+            
+            # إضافة اتجاهات من الإطارات الأخرى لتعزيز دقة التحليل
+            for tf in ['M5', 'M30', 'M60']:
+                if tf in multi_tf_indicators:
+                    tf_data = multi_tf_indicators[tf].get('indicators', {})
+                    # إضافة معلومات الاتجاه من الإطارات الأخرى
+                    consolidated[f'{tf.lower()}_trend'] = tf_data.get('trend', 'محايد')
+                    consolidated[f'{tf.lower()}_rsi'] = tf_data.get('rsi', 50)
+            
+            logger.debug(f"[CONSOLIDATE] تم دمج مؤشرات متعددة الإطارات مع التركيز على M15")
+            return consolidated
+            
+        except Exception as e:
+            logger.error(f"[CONSOLIDATE_ERROR] خطأ في دمج المؤشرات متعددة الإطارات: {e}")
+            # إرجاع M15 فقط في حالة الخطأ
+            return multi_tf_indicators.get('M15', {}).get('indicators', {}) if multi_tf_indicators else {}
     
     def _build_enhanced_background_prompt(self, symbol: str, current_price: float, bid: float, ask: float, 
                                         spread: float, indicators: Dict, trading_mode: str, capital: float, timezone_str: str) -> str:
