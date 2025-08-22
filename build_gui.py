@@ -207,6 +207,7 @@ def build_executable():
         '--clean',                      # Clean cache
         '--noconfirm',                  # Don't ask for confirmation
         '--optimize=2',                 # Optimize bytecode
+        '--debug=imports',              # Debug import issues
         '--version-file=version_info.txt',  # Version info
         
         # Hidden imports for all required modules
@@ -226,20 +227,9 @@ def build_executable():
         '--hidden-import=tkinter.ttk',
         '--hidden-import=tkinter.simpledialog',
         
-        # Additional hidden imports for google-generativeai
-        '--hidden-import=google.ai.generativelanguage',
-        '--hidden-import=google.ai.generativelanguage_v1beta',
-        '--hidden-import=google.generativeai.string_utils',
-        '--hidden-import=grpc',
-        '--hidden-import=grpcio',
-        '--hidden-import=google.protobuf',
-        '--hidden-import=google.auth',
-        '--hidden-import=google.auth.transport',
-        '--hidden-import=google.auth.transport.requests',
-        
-        # Collect all submodules for problematic packages
+        # Simplified imports - let PyInstaller auto-detect most dependencies
+        '--hidden-import=google.generativeai',
         '--collect-all=google.generativeai',
-        '--collect-all=google.ai.generativelanguage',
         
         # Exclude unnecessary modules
         '--exclude-module=matplotlib',
@@ -254,7 +244,11 @@ def build_executable():
     ]
     
     # إضافة الأيقونة إذا كانت موجودة
-    if os.path.exists('icon.ico'):
+    icon_path = os.path.abspath('icon.ico')
+    if os.path.exists(icon_path):
+        cmd.insert(-1, f'--icon={icon_path}')
+        print(f"🎨 سيتم استخدام أيقونة: {icon_path}")
+    elif os.path.exists('icon.ico'):
         cmd.insert(-1, '--icon=icon.ico')
         print("🎨 سيتم استخدام أيقونة icon.ico")
     else:

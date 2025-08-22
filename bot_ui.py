@@ -86,9 +86,12 @@ except ImportError:
     MT5_AVAILABLE = False
     
 try:
-    import google.generativeai as genai
+    # استيراد ديناميكي لتجنب مشاكل PyInstaller
+    import importlib
+    genai = importlib.import_module('google.generativeai')
     GEMINI_AVAILABLE = True
-except ImportError:
+except (ImportError, ModuleNotFoundError):
+    genai = None
     GEMINI_AVAILABLE = False
 
 from telebot import types
