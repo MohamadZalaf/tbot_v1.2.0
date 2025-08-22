@@ -58,7 +58,13 @@ a = Analysis(
         'sys',
         'ta',
         'PIL',
-        'configparser'
+        'PIL.Image',
+        'PIL.ImageTk',
+        'PIL.ImageDraw',
+        'PIL.ImageFont',
+        'configparser',
+        'traceback',
+        'pytz'
     ],
     hookspath=[],
     hooksconfig={},
