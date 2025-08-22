@@ -119,14 +119,41 @@ def get_all_user_data_sources():
     try:
         users_data = []
         
-        # Try to read from running bot's log file first (real-time data)
+        # 1. Read from shared active users file (highest priority - real-time data)
+        shared_file = "trading_data/active_users.json"
+        if os.path.exists(shared_file):
+            try:
+                with open(shared_file, 'r', encoding='utf-8') as f:
+                    shared_data = json.load(f)
+                
+                active_users = shared_data.get('users', [])
+                for user in active_users:
+                    user_info = {
+                        'user_id': str(user['user_id']),
+                        'username': user.get('username', 'Unknown'),
+                        'first_name': user.get('first_name', f"User {user['user_id']}"),
+                        'last_name': user.get('last_name', ''),
+                        'registration_date': user.get('login_time', 'Unknown'),
+                        'last_activity': user.get('last_activity', 'Unknown'),
+                        'trading_mode': user.get('trading_mode', 'Unknown'),
+                        'is_banned': False,  # Will be checked later
+                        'source': 'active_session'
+                    }
+                    users_data.append(user_info)
+                    
+                print(f"✅ Loaded {len(active_users)} active users from shared file")
+                
+            except Exception as e:
+                print(f"Error reading shared user data: {e}")
+        
+        # 2. Try to read from running bot's log file as fallback
         try:
             if os.path.exists('advanced_trading_bot_v1.2.0.log'):
                 with open('advanced_trading_bot_v1.2.0.log', 'r', encoding='utf-8') as f:
                     log_lines = f.readlines()
                     
                 # Extract user data from recent log entries
-                for line in reversed(log_lines[-1000:]):  # Check last 1000 lines
+                for line in reversed(log_lines[-500:]):  # Check last 500 lines
                     if 'User data saved for' in line or 'authenticated successfully' in line:
                         try:
                             # Extract user ID from log
@@ -138,7 +165,7 @@ def get_all_user_data_sources():
                                 if not any(u['user_id'] == user_id for u in users_data):
                                     user_info = {
                                         'user_id': user_id,
-                                        'username': 'Active User',
+                                        'username': 'Log User',
                                         'first_name': f'User {user_id}',
                                         'last_name': '',
                                         'registration_date': line.split(' - ')[0] if ' - ' in line else 'Unknown',
@@ -153,7 +180,7 @@ def get_all_user_data_sources():
         except Exception as e:
             print(f"Could not read bot log: {e}")
         
-        # 1. Read from user feedback files (trading_data/user_feedback_*.json)
+        # 3. Read from user feedback files (trading_data/user_feedback_*.json)
         feedback_files = glob.glob("trading_data/user_feedback_*.json")
         for feedback_file in feedback_files:
             try:
@@ -195,7 +222,7 @@ def get_all_user_data_sources():
                 print(f"Error reading feedback file {feedback_file}: {e}")
                 continue
         
-        # 2. Read from trade logs (trading_data/trade_logs/)
+        # 4. Read from trade logs (trading_data/trade_logs/)
         if os.path.exists("trading_data/trade_logs"):
             trade_files = glob.glob("trading_data/trade_logs/*.json")
             for trade_file in trade_files:
@@ -223,7 +250,7 @@ def get_all_user_data_sources():
                 except Exception as e:
                     continue
         
-        # 3. Read from old users directory if it exists (backward compatibility)
+        # 5. Read from old users directory if it exists (backward compatibility)
         if os.path.exists("trading_data/users"):
             user_files = glob.glob("trading_data/users/user_*.json")
             for user_file in user_files:
