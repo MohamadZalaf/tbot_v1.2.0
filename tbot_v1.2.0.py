@@ -9753,32 +9753,36 @@ def handle_start(message):
     user_id = message.from_user.id
     
     # التحقق من كلمة المرور
-    if user_id not in user_sessions:
+    if user_id not in user_sessions or not user_sessions[user_id].get('authenticated', False):
+        # تسجيل محاولة الوصول
+        user_info = message.from_user
+        logger.info(f"[ACCESS] محاولة وصول غير مصرح: {user_info.first_name} {user_info.last_name or ''} (@{user_info.username or 'N/A'}) - ID: {user_id}")
+        
         # إنشاء كيبورد مخفي لإدخال كلمة السر
         hide_keyboard = types.ReplyKeyboardRemove()
         bot.send_message(
             chat_id=user_id,
-            text="🔐 يرجى إدخال كلمة المرور للوصول إلى البوت:",
+            text="🔐 Please enter the password to access the bot:",
             reply_markup=hide_keyboard
         )
         user_states[user_id] = 'waiting_password'
         return
     
-    # رسالة الترحيب
+    # Welcome message
     welcome_message = f"""
-🎉 **مرحباً بك في بوت التداول المتقدم v1.2.0!**
+🎉 **Welcome to Advanced Trading Bot v1.2.0!**
 
-🚀 **الميزات الجديدة:**
-✅ بيانات لحظية حقيقية من MetaTrader5
-✅ تحليل ذكي بتقنية Google Gemini AI
-✅ نظام تقييم الإشعارات 👍👎
-✅ تعلم آلي من تقييماتك
+🚀 **New Features:**
+✅ Real-time data from MetaTrader5
+✅ Smart analysis with Google Gemini AI
+✅ Notification rating system 👍👎
+✅ Machine learning from your feedback
 
-📊 **حالة الاتصال:**
-• MetaTrader5: {'✅ متصل' if mt5_manager.connected else '❌ غير متصل'}
-• Gemini AI: {'✅ متاح' if GEMINI_AVAILABLE else '❌ غير متاح'}
+📊 **Connection Status:**
+• MetaTrader5: {'✅ Connected' if mt5_manager.connected else '❌ Disconnected'}
+• Gemini AI: {'✅ Available' if GEMINI_AVAILABLE else '❌ Unavailable'}
 
-🎯 **للبدء:** استخدم الأزرار في الأسفل للتنقل بين الوظائف.
+🎯 **To Start:** Use the buttons below to navigate between functions.
     """
     
     bot.send_message(
@@ -10214,20 +10218,30 @@ def handle_password(message):
     user_id = message.from_user.id
     
     if message.text == BOT_PASSWORD:
+        # تسجيل معلومات المستخدم
+        user_info = message.from_user
+        logger.info(f"[AUTH] تم تسجيل دخول المستخدم: {user_info.first_name} {user_info.last_name or ''} (@{user_info.username or 'N/A'}) - ID: {user_id}")
+        
         user_sessions[user_id] = {
             'authenticated': True,
             'trading_mode': 'scalping',
-            'notification_settings': get_user_advanced_notification_settings(user_id)
+            'notification_settings': get_user_advanced_notification_settings(user_id),
+            'user_info': {
+                'first_name': user_info.first_name,
+                'last_name': user_info.last_name,
+                'username': user_info.username,
+                'registration_time': datetime.now().isoformat()
+            }
         }
         
         # إجبار سؤال رأس المال لجميع المستخدمين بعد كلمة المرور
         user_states[user_id] = 'waiting_initial_capital'
         
         message_text = """
-💰 **مرحباً بك! يرجى تحديد رأس المال للبدء**
+💰 **Welcome! Please set your capital to start**
 
-اختر رأس المال المناسب لك:
-(يمكن تعديله لاحقاً من الإعدادات)
+Choose the appropriate capital for you:
+(Can be modified later from settings)
         """
         
         markup = types.InlineKeyboardMarkup(row_width=2)
@@ -10238,7 +10252,7 @@ def handle_password(message):
             )
         
         markup.row(
-            create_animated_button("💰 إدخال مبلغ مخصص", "initial_custom_capital", "💰")
+            create_animated_button("💰 Enter Custom Amount", "initial_custom_capital", "💰")
         )
         
         bot.send_message(
@@ -10248,7 +10262,7 @@ def handle_password(message):
             reply_markup=markup
         )
     else:
-        bot.reply_to(message, "❌ كلمة مرور خاطئة. حاول مرة أخرى:")
+        bot.reply_to(message, "❌ Wrong password. Try again:")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("initial_capital_"))
 def handle_initial_capital(call):
@@ -10261,8 +10275,8 @@ def handle_initial_capital(call):
         user_states.pop(user_id, None)
         
         bot.edit_message_text(
-            f"✅ تم تحديد رأس المال: ${capital:,}\n\n"
-            "🎉 مرحباً بك في بوت التداول المتقدم v1.2.0!",
+            f"✅ Capital set: ${capital:,}\n\n"
+            "🎉 Welcome to Advanced Trading Bot v1.2.0!",
             call.message.chat.id,
             call.message.message_id,
             reply_markup=None
@@ -13076,20 +13090,23 @@ def handle_unknown_message(message):
     user_id = message.from_user.id
     
     # التحقق من كلمة السر أولاً
-    if user_id not in user_sessions:
+    if user_id not in user_sessions or not user_sessions[user_id].get('authenticated', False):
         # إذا لم يكن المستخدم في حالة انتظار كلمة السر، ضعه في هذه الحالة
         if user_states.get(user_id) != 'waiting_password':
+            user_info = message.from_user
+            logger.info(f"[UNKNOWN_MSG] رسالة غير مصرحة من: {user_info.first_name} {user_info.last_name or ''} (@{user_info.username or 'N/A'}) - ID: {user_id}")
+            
             hide_keyboard = types.ReplyKeyboardRemove()
             bot.send_message(
                 chat_id=user_id,
-                text="🔐 يجب إدخال كلمة المرور أولاً للوصول إلى البوت:",
+                text="🔐 You must enter the password first to access the bot:",
                 reply_markup=hide_keyboard
             )
             user_states[user_id] = 'waiting_password'
         return
     
-    # إذا كان المستخدم مصدق، أرسل رسالة غير معروفة
-    bot.reply_to(message, "❓ أمر غير معروف. استخدم الأزرار في الأسفل للتنقل.")
+    # If user is authenticated, send unknown message
+    bot.reply_to(message, "❓ Unknown command. Use the buttons below to navigate.")
 
 # ===== معالجات المنطقة الزمنية =====
 @bot.callback_query_handler(func=lambda call: call.data == "timezone_settings")

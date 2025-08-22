@@ -501,14 +501,20 @@ class TradingBotUI:
         self.root = tk.Tk()
         self.root.title("🤖 بوت التداول المتقدم v1.2.0 - واجهة التحكم")
         self.root.geometry("850x750")
-        self.root.resizable(False, False)
+        self.root.resizable(False, False)  # Prevent resizing but allow moving
         
-        # Set embedded icon
+        # Set icon
         try:
-            icon_data = base64.b64decode(EMBEDDED_ICON)
-            icon_image = tk.PhotoImage(data=icon_data)
-            self.root.iconphoto(False, icon_image)
-        except:
+            # Try to use icon.ico file first
+            if os.path.exists('icon.ico'):
+                self.root.iconbitmap('icon.ico')
+            else:
+                # Fallback to embedded icon
+                icon_data = base64.b64decode(EMBEDDED_ICON)
+                icon_image = tk.PhotoImage(data=icon_data)
+                self.root.iconphoto(False, icon_image)
+        except Exception as e:
+            print(f"Failed to set icon: {e}")
             pass
         
         # Configure main style
@@ -814,6 +820,7 @@ class TradingBotUI:
         users_window.geometry("1000x600")
         users_window.configure(bg='#2b2b2b')
         users_window.transient(self.root)
+        users_window.resizable(False, False)  # Prevent resizing but allow moving
         users_window.grab_set()
         
         # Main frame
@@ -1092,15 +1099,19 @@ class TradingBotUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
+        # Create centered container for all sections
+        centered_container = tk.Frame(scrollable_frame, bg='#2b2b2b')
+        centered_container.pack(expand=True)
+        
         # Telegram API Section
         telegram_frame = tk.LabelFrame(
-            scrollable_frame,
+            centered_container,
             text="📱 إدارة رمز Telegram Bot API",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
         )
-        telegram_frame.pack(fill=tk.X, padx=10, pady=10)
+        telegram_frame.pack(pady=10, padx=20)
         
         # Current token display
         token_label = tk.Label(
@@ -1150,13 +1161,13 @@ class TradingBotUI:
         
         # Gemini API Section
         gemini_frame = tk.LabelFrame(
-            scrollable_frame,
+            centered_container,
             text="🤖 إدارة مفاتيح Gemini API",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
         )
-        gemini_frame.pack(fill=tk.X, padx=10, pady=10)
+        gemini_frame.pack(pady=10, padx=20)
         
         # API Keys listbox
         keys_label = tk.Label(
@@ -1250,13 +1261,13 @@ class TradingBotUI:
         
         # MT5 Login Section
         mt5_frame = tk.LabelFrame(
-            scrollable_frame,
+            centered_container,
             text="🏦 إعدادات تسجيل الدخول MT5",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
         )
-        mt5_frame.pack(fill=tk.X, padx=10, pady=10)
+        mt5_frame.pack(pady=10, padx=20)
         
         # MT5 Account field
         account_label = tk.Label(
@@ -1841,6 +1852,7 @@ class TradingBotUI:
             status_window.geometry("600x500")
             status_window.configure(bg='#2b2b2b')
             status_window.transient(self.settings_window)
+            status_window.resizable(False, False)  # Prevent resizing but allow moving
             status_window.grab_set()
             
             # Status text area
@@ -1955,6 +1967,7 @@ class TradingBotUI:
             progress_window.geometry("400x150")
             progress_window.configure(bg='#2b2b2b')
             progress_window.transient(self.settings_window)
+            progress_window.resizable(False, False)  # Prevent resizing but allow moving
             progress_window.grab_set()
             
             progress_label = tk.Label(
@@ -2034,6 +2047,7 @@ class TradingBotUI:
             progress_window.geometry("400x150")
             progress_window.configure(bg='#2b2b2b')
             progress_window.transient(self.settings_window)
+            progress_window.resizable(False, False)  # Prevent resizing but allow moving
             progress_window.grab_set()
             
             progress_label = tk.Label(
@@ -2582,14 +2596,20 @@ class TradingBotUI:
         try:
             self.add_log("🚀 جاري تشغيل بوت التداول الخارجي...")
             
-            # Start external bot process
+            # Start external bot process (prevent CMD window from showing)
+            import subprocess
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NO_WINDOW
+            
             self.bot_process = subprocess.Popen(
                 [sys.executable, bot_file],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
-                cwd=os.getcwd()
+                cwd=os.getcwd(),
+                creationflags=creationflags
             )
             
             # Start thread to read bot output
