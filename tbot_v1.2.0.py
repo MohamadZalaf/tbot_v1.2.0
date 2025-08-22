@@ -99,6 +99,56 @@ try:
 except ImportError:
     TIMEZONE_AVAILABLE = False
 
+# مجلدات تخزين البيانات - يجب تعريفها مبكراً
+DATA_DIR = "trading_data"
+FEEDBACK_DIR = os.path.join(DATA_DIR, "user_feedback")
+TRADE_LOGS_DIR = os.path.join(DATA_DIR, "trade_logs")
+CHAT_LOGS_DIR = os.path.join(DATA_DIR, "chat_logs")
+
+# إنشاء المجلدات إذا لم تكن موجودة
+for directory in [DATA_DIR, FEEDBACK_DIR, TRADE_LOGS_DIR, CHAT_LOGS_DIR]:
+    os.makedirs(directory, exist_ok=True)
+
+# دالة لإنشاء ملفات JSON المطلوبة إذا لم تكن موجودة
+def ensure_json_files_exist():
+    """إنشاء جميع ملفات JSON المطلوبة بالبيانات الافتراضية إذا لم تكن موجودة"""
+    from datetime import datetime
+    import json
+    
+    # قائمة الملفات المطلوبة مع بياناتها الافتراضية
+    json_files = {
+        os.path.join(DATA_DIR, "active_users.json"): [],
+        os.path.join(DATA_DIR, 'crossover_history.json'): {},
+        os.path.join(DATA_DIR, 'crossover_performance.json'): {},
+        os.path.join(DATA_DIR, 'historical_performance.json'): {},
+        os.path.join(DATA_DIR, 'community_feedback.json'): {},
+        os.path.join(DATA_DIR, 'ai_training_data.json'): {},
+        os.path.join(FEEDBACK_DIR, "ai_training_data.json"): {},
+        os.path.join(FEEDBACK_DIR, "learned_patterns.json"): {},
+        os.path.join(FEEDBACK_DIR, "analysis_rules.json"): {
+            "rules": [],
+            "last_updated": datetime.now().isoformat(),
+            "version": "1.0"
+        }
+    }
+    
+    for file_path, default_data in json_files.items():
+        if not os.path.exists(file_path):
+            try:
+                # إنشاء المجلد الأب إذا لم يكن موجوداً
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                
+                # إنشاء الملف بالبيانات الافتراضية
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(default_data, f, ensure_ascii=False, indent=2)
+                print(f"✅ تم إنشاء ملف: {file_path}")
+                
+            except Exception as e:
+                print(f"❌ خطأ في إنشاء ملف {file_path}: {e}")
+
+# استدعاء الدالة لإنشاء الملفات المطلوبة
+ensure_json_files_exist()
+
 warnings.filterwarnings('ignore')
 
 # متغيرات نظام كشف نفاذ رصيد API
@@ -2591,15 +2641,7 @@ user_trading_modes = {}  # أنماط التداول للمستخدمين
 user_advanced_notification_settings = {}  # إعدادات التنبيهات المتقدمة
 user_timezones = {}  # المناطق الزمنية للمستخدمين
 
-# مجلدات تخزين البيانات
-DATA_DIR = "trading_data"
-FEEDBACK_DIR = os.path.join(DATA_DIR, "user_feedback")
-TRADE_LOGS_DIR = os.path.join(DATA_DIR, "trade_logs")
-CHAT_LOGS_DIR = os.path.join(DATA_DIR, "chat_logs")
-
-# إنشاء المجلدات إذا لم تكن موجودة
-for directory in [DATA_DIR, FEEDBACK_DIR, TRADE_LOGS_DIR, CHAT_LOGS_DIR]:
-    os.makedirs(directory, exist_ok=True)
+# مجلدات تخزين البيانات تم نقلها إلى أعلى الملف
 
 # رسائل تحذير للمكتبات المفقودة
 if not TIMEZONE_AVAILABLE:
