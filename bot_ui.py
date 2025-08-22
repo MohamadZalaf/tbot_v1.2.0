@@ -230,10 +230,15 @@ class EmbeddedTradingBot:
         """Get total number of users from JSON files"""
         try:
             user_files = glob.glob(os.path.join(USERS_DIR, "user_*.json"))
-            return len(user_files)
+            count = len(user_files)
+            if count == 0:
+                # Check if any users have been saved by the bot
+                # If no users directory or files exist, return a message
+                return "No users data"
+            return count
         except Exception as e:
             self.logger.error(f"Error getting users count: {e}")
-            return 0
+            return "Error"
     
     def get_users_details(self):
         """Get detailed information about all users"""
@@ -502,7 +507,7 @@ class TradingBotUI:
     def setup_main_window(self):
         """Setup main application window"""
         self.root = tk.Tk()
-        self.root.title("🤖 بوت التداول المتقدم v1.2.0 - واجهة التحكم")
+        self.root.title("🤖 Advanced Trading Bot v1.2.0 - Control Interface")
         self.root.geometry("850x750")
         self.root.resizable(False, False)  # Prevent resizing but allow moving
         
@@ -540,9 +545,9 @@ class TradingBotUI:
             
             # Load and resize icon
             icon_image = Image.open('icon.ico')
-            # Create different sizes for different uses
-            self.small_icon = ImageTk.PhotoImage(icon_image.resize((24, 24), Image.Resampling.LANCZOS))
-            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((48, 48), Image.Resampling.LANCZOS))
+            # Create different sizes for different uses (increased sizes)
+            self.small_icon = ImageTk.PhotoImage(icon_image.resize((32, 32), Image.Resampling.LANCZOS))
+            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((64, 64), Image.Resampling.LANCZOS))
             print("Interface icons created successfully")
         except ImportError as e:
             print(f"PIL not available, using fallback: {e}")
@@ -572,7 +577,7 @@ class TradingBotUI:
         
         title_label = tk.Label(
             self.login_frame,
-            text="بوت التداول المتقدم",
+            text="Advanced Trading Bot",
             font=("Arial", 24, "bold"),
             fg='#00ff00',
             bg='#2b2b2b'
@@ -582,7 +587,7 @@ class TradingBotUI:
         # Subtitle
         subtitle_label = tk.Label(
             self.login_frame,
-            text="واجهة التحكم المتقدمة v1.2.0 - نظام مدمج كامل",
+            text="Advanced Control Interface v1.2.0 - Complete Integrated System",
             font=("Arial", 12),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -596,7 +601,7 @@ class TradingBotUI:
         # Password label
         password_label = tk.Label(
             password_frame,
-            text="🔐 أدخل كلمة المرور:",
+            text="🔐 Enter Password:",
             font=("Arial", 14),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -617,7 +622,7 @@ class TradingBotUI:
         # Login button
         self.login_button = tk.Button(
             password_frame,
-            text="🚀 دخول",
+            text="🚀 Login",
             font=("Arial", 12, "bold"),
             bg='#00aa00',
             fg='white',
@@ -672,7 +677,7 @@ class TradingBotUI:
         
         header_label = tk.Label(
             title_container,
-            text="لوحة التحكم في بوت التداول - نظام مدمج كامل",
+            text="Trading Bot Control Panel - Complete Integrated System",
             font=("Arial", 18, "bold"),
             fg='#00ff00',
             bg='#2b2b2b'
@@ -695,7 +700,7 @@ class TradingBotUI:
         # Users count button (with click functionality)
         self.users_count_button = tk.Button(
             header_frame,
-            text="👥 عدد المستخدمين: 0",
+            text="👥 Users Count: 0",
             font=("Arial", 10, "bold"),
             bg='#800020',
             fg='#ff0000',
@@ -716,12 +721,12 @@ class TradingBotUI:
         
         # Control buttons frame
         control_buttons_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
-        control_buttons_frame.pack(pady=20)
+        control_buttons_frame.pack(pady=10)
         
         # Start Bot button
         self.start_button = tk.Button(
             control_buttons_frame,
-            text="🚀 تشغيل البوت",
+            text="🚀 Start Bot",
             font=("Arial", 14, "bold"),
             bg='#00aa00',
             fg='white',
@@ -734,7 +739,7 @@ class TradingBotUI:
         # Stop Bot button
         self.stop_button = tk.Button(
             control_buttons_frame,
-            text="🛑 إيقاف البوت",
+            text="🛑 Stop Bot",
             font=("Arial", 14, "bold"),
             bg='#aa0000',
             fg='white',
@@ -747,12 +752,12 @@ class TradingBotUI:
         
         # Status frame
         status_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
-        status_frame.pack(fill=tk.X, pady=20)
+        status_frame.pack(fill=tk.X, pady=10)
         
         # Status label
         status_label = tk.Label(
             status_frame,
-            text="📊 حالة البوت:",
+            text="📊 Bot Status:",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -762,7 +767,7 @@ class TradingBotUI:
         # Status indicator
         self.status_indicator = tk.Label(
             status_frame,
-            text="⚫ متوقف",
+            text="⚫ Stopped",
             font=("Arial", 12),
             fg='#ff6666',
             bg='#2b2b2b'
@@ -771,7 +776,7 @@ class TradingBotUI:
         
         # Log frame
         log_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=20)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
         # Log label with icon
         log_header_frame = tk.Frame(log_frame, bg='#2b2b2b')
@@ -787,7 +792,7 @@ class TradingBotUI:
         
         log_label = tk.Label(
             log_header_frame,
-            text="سجل الأحداث:",
+            text="Event Log:",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -2626,11 +2631,11 @@ class TradingBotUI:
         
         if entered_password == self.PASSWORD:
             self.is_logged_in = True
-            self.login_status_label.config(text="✅ تم تسجيل الدخول بنجاح!", fg='#00ff00')
+            self.login_status_label.config(text="✅ Login successful!", fg='#00ff00')
             self.add_log("🔐 تم تسجيل دخول المستخدم بنجاح")
             self.root.after(1000, self.show_control)
         else:
-            self.login_status_label.config(text="❌ كلمة مرور خاطئة!", fg='#ff6666')
+            self.login_status_label.config(text="❌ Wrong password!", fg='#ff6666')
             self.password_entry.delete(0, tk.END)
             self.password_entry.focus()
     
@@ -2649,7 +2654,18 @@ class TradingBotUI:
     def start_bot(self):
         """Start the external bot file tbot_v1.2.0.py"""
         if not self.is_logged_in:
-            messagebox.showerror("رفض الوصول", "يرجى تسجيل الدخول أولاً!")
+            messagebox.showerror("Access Denied", "Please login first!")
+            return
+        
+        # Ask for password before starting bot
+        password = simpledialog.askstring(
+            "Password Required",
+            "Enter password to start the bot:",
+            show='*'
+        )
+        
+        if password != self.PASSWORD:
+            messagebox.showerror("Error", "Incorrect password!")
             return
         
         # Check if bot file exists
@@ -2703,7 +2719,18 @@ class TradingBotUI:
     def stop_bot(self):
         """Stop the external bot process"""
         if not self.is_logged_in:
-            messagebox.showerror("رفض الوصول", "يرجى تسجيل الدخول أولاً!")
+            messagebox.showerror("Access Denied", "Please login first!")
+            return
+        
+        # Ask for password before stopping bot
+        password = simpledialog.askstring(
+            "Password Required",
+            "Enter password to stop the bot:",
+            show='*'
+        )
+        
+        if password != self.PASSWORD:
+            messagebox.showerror("Error", "Incorrect password!")
             return
         
         try:
@@ -2802,7 +2829,7 @@ class TradingBotUI:
                 if hasattr(self, 'users_count_button'):
                     users_count = self.embedded_bot.get_users_count()
                     self.root.after(0, lambda: self.users_count_button.config(
-                        text=f"👥 عدد المستخدمين: {users_count}"
+                        text=f"👥 Users Count: {users_count}"
                     ))
                 
                 time.sleep(5)  # Check every 5 seconds
@@ -2816,10 +2843,31 @@ class TradingBotUI:
         bot_running = hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None
         
         if bot_running:
-            if messagebox.askokcancel("إنهاء", "البوت لا يزال يعمل. إيقاف البوت والخروج؟"):
-                self.stop_bot()
-                self.is_monitoring = False
-                self.root.destroy()
+            # Ask for password before allowing to close when bot is running
+            password = simpledialog.askstring(
+                "Password Required",
+                "Bot is running. Enter password to stop bot and exit:",
+                show='*'
+            )
+            
+            if password == self.PASSWORD:
+                if messagebox.askokcancel("Exit", "Stop the bot and exit?"):
+                    try:
+                        # Stop the bot process
+                        if hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None:
+                            self.bot_process.terminate()
+                            try:
+                                self.bot_process.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                self.bot_process.kill()
+                        
+                        self.is_monitoring = False
+                        self.root.destroy()
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Error stopping bot: {e}")
+            else:
+                if password is not None:  # User didn't cancel
+                    messagebox.showerror("Error", "Incorrect password! Cannot exit while bot is running.")
         else:
             self.is_monitoring = False
             self.root.destroy()
