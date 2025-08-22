@@ -189,9 +189,12 @@ def build_executable():
     """Build the executable using PyInstaller"""
     print("🔨 بدء عملية البناء...")
     
-    # إنشاء الأيقونة أولاً
-    print("🎨 إنشاء أيقونة البوت...")
-    create_icon()
+    # التحقق من وجود الأيقونة أو إنشاؤها
+    if not os.path.exists('icon.ico'):
+        print("🎨 إنشاء أيقونة البوت...")
+        create_icon()
+    else:
+        print("🎨 تم العثور على ملف icon.ico موجود")
     
     # PyInstaller command with optimized settings
     cmd = [
@@ -205,7 +208,6 @@ def build_executable():
         '--noconfirm',                  # Don't ask for confirmation
         '--optimize=2',                 # Optimize bytecode
         '--version-file=version_info.txt',  # Version info
-        '--icon=icon.ico',              # Icon file
         
         # Hidden imports for all required modules
         '--hidden-import=telebot',
@@ -250,6 +252,13 @@ def build_executable():
         
         'bot_ui.py'  # Main script
     ]
+    
+    # إضافة الأيقونة إذا كانت موجودة
+    if os.path.exists('icon.ico'):
+        cmd.insert(-1, '--icon=icon.ico')
+        print("🎨 سيتم استخدام أيقونة icon.ico")
+    else:
+        print("⚠️ لم يتم العثور على icon.ico - سيتم استخدام الأيقونة الافتراضية")
     
     try:
         print("⚙️  تشغيل PyInstaller...")
