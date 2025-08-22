@@ -99,8 +99,9 @@ try:
 except ImportError:
     TIMEZONE_AVAILABLE = False
 
-# مجلدات تخزين البيانات - يجب تعريفها مبكراً
-DATA_DIR = "trading_data"
+# مجلدات تخزين البيانات - يجب تعريفها مبكراً (نسبية لمسار البوت)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(SCRIPT_DIR, "trading_data")
 FEEDBACK_DIR = os.path.join(DATA_DIR, "user_feedback")
 TRADE_LOGS_DIR = os.path.join(DATA_DIR, "trade_logs")
 CHAT_LOGS_DIR = os.path.join(DATA_DIR, "chat_logs")
@@ -141,10 +142,18 @@ def ensure_json_files_exist():
                 # إنشاء الملف بالبيانات الافتراضية
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(default_data, f, ensure_ascii=False, indent=2)
-                print(f"✅ تم إنشاء ملف: {file_path}")
+                # تجنب استخدام Unicode في Windows console
+                try:
+                    print(f"[OK] تم إنشاء ملف: {file_path}")
+                except UnicodeEncodeError:
+                    print(f"[OK] File created: {os.path.basename(file_path)}")
                 
             except Exception as e:
-                print(f"❌ خطأ في إنشاء ملف {file_path}: {e}")
+                # تجنب استخدام Unicode في Windows console
+                try:
+                    print(f"[ERROR] خطأ في إنشاء ملف {file_path}: {e}")
+                except UnicodeEncodeError:
+                    print(f"[ERROR] Failed to create file {os.path.basename(file_path)}: {e}")
 
 # استدعاء الدالة لإنشاء الملفات المطلوبة
 ensure_json_files_exist()
