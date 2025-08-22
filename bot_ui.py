@@ -594,6 +594,19 @@ class TradingBotUI:
         )
         self.users_count_button.pack(side=tk.RIGHT, padx=5)
         
+        # About button
+        about_button = tk.Button(
+            header_frame,
+            text="ℹ️",
+            font=("Arial", 14, "bold"),
+            bg='#2196F3',
+            fg='white',
+            width=3,
+            height=1,
+            command=self.show_about_dialog
+        )
+        about_button.pack(side=tk.RIGHT, padx=5)
+        
         # Logout button
         logout_button = tk.Button(
             header_frame,
