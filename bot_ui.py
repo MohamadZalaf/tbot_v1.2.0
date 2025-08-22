@@ -466,7 +466,7 @@ class TradingBotUI:
         self.root = tk.Tk()
         self.root.title("🤖 بوت التداول المتقدم v1.2.0 - واجهة التحكم")
         self.root.geometry("1000x750")
-        self.root.resizable(True, True)
+        self.root.resizable(False, False)
         
         # Set embedded icon
         try:
@@ -1001,10 +1001,11 @@ class TradingBotUI:
             
         self.settings_window = tk.Toplevel(self.root)
         self.settings_window.title("⚙️ إعدادات البوت")
-        self.settings_window.geometry("800x600")
+        self.settings_window.geometry("800x700")
         self.settings_window.configure(bg='#2b2b2b')
         self.settings_window.transient(self.root)
         self.settings_window.grab_set()
+        self.settings_window.resizable(False, False)
         
         # Create notebook for tabs
         notebook = ttk.Notebook(self.settings_window)
@@ -1018,6 +1019,22 @@ class TradingBotUI:
         
         # Security tab (with additional password protection)
         self.create_security_tab(notebook)
+        
+        # Add exit button at the bottom
+        exit_frame = tk.Frame(self.settings_window, bg='#2b2b2b')
+        exit_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+        
+        exit_button = tk.Button(
+            exit_frame,
+            text="🚪 إغلاق النافذة",
+            font=("Arial", 12, "bold"),
+            bg='#f44336',
+            fg='white',
+            command=self.settings_window.destroy,
+            width=15,
+            height=1
+        )
+        exit_button.pack(side=tk.RIGHT)
     
     def create_configurations_tab(self, notebook):
         """Create configurations tab"""
@@ -1069,31 +1086,12 @@ class TradingBotUI:
         )
         self.telegram_token_entry.grid(row=0, column=1, padx=5, pady=5)
         
-        # Bot password
-        bot_password_label = tk.Label(
-            telegram_frame,
-            text="كلمة مرور البوت:",
-            font=("Arial", 10),
-            fg='#ffffff',
-            bg='#2b2b2b'
-        )
-        bot_password_label.grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-        
-        self.bot_password_entry = tk.Entry(
-            telegram_frame,
-            font=("Arial", 10),
-            width=50,
-            bg='#1a1a1a',
-            fg='#ffffff'
-        )
-        self.bot_password_entry.grid(row=1, column=1, padx=5, pady=5)
-        
         # Load current telegram settings
         self.load_telegram_settings()
         
         # Telegram save button
         telegram_save_frame = tk.Frame(telegram_frame, bg='#2b2b2b')
-        telegram_save_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        telegram_save_frame.grid(row=1, column=0, columnspan=2, pady=10)
         
         save_telegram_button = tk.Button(
             telegram_save_frame,
@@ -1968,12 +1966,9 @@ class TradingBotUI:
         """Load Telegram settings into fields"""
         try:
             self.telegram_token_entry.delete(0, tk.END)
-            self.bot_password_entry.delete(0, tk.END)
             
             if EMBEDDED_CONFIG.get('BOT_TOKEN'):
                 self.telegram_token_entry.insert(0, EMBEDDED_CONFIG['BOT_TOKEN'])
-            if EMBEDDED_CONFIG.get('BOT_PASSWORD'):
-                self.bot_password_entry.insert(0, EMBEDDED_CONFIG['BOT_PASSWORD'])
                 
         except Exception as e:
             self.add_log(f"خطأ في تحميل إعدادات Telegram: {str(e)}")
@@ -1982,7 +1977,6 @@ class TradingBotUI:
         """Save Telegram settings"""
         try:
             EMBEDDED_CONFIG['BOT_TOKEN'] = self.telegram_token_entry.get().strip()
-            EMBEDDED_CONFIG['BOT_PASSWORD'] = self.bot_password_entry.get().strip()
             
             self.save_config()
             messagebox.showinfo("نجح", "تم حفظ إعدادات Telegram بنجاح")
