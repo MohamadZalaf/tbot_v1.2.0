@@ -583,18 +583,7 @@ class TradingBotUI:
         )
         header_label.pack(side=tk.LEFT, padx=20)
         
-        # Users count button (with click functionality)
-        self.users_count_button = tk.Button(
-            header_frame,
-            text="👥 عدد المستخدمين: 0",
-            font=("Arial", 10, "bold"),
-            bg='#800020',
-            fg='#ff0000',
-            command=self.show_users_management_window
-        )
-        self.users_count_button.pack(side=tk.RIGHT, padx=5)
-        
-        # About button
+        # About button (top right)
         about_button = tk.Button(
             header_frame,
             text="ℹ️",
@@ -606,6 +595,17 @@ class TradingBotUI:
             command=self.show_about_dialog
         )
         about_button.pack(side=tk.RIGHT, padx=5)
+        
+        # Users count button (with click functionality)
+        self.users_count_button = tk.Button(
+            header_frame,
+            text="👥 عدد المستخدمين: 0",
+            font=("Arial", 10, "bold"),
+            bg='#800020',
+            fg='#ff0000',
+            command=self.show_users_management_window
+        )
+        self.users_count_button.pack(side=tk.RIGHT, padx=5)
         
         # Logout button
         logout_button = tk.Button(
@@ -2251,9 +2251,173 @@ class TradingBotUI:
                 messagebox.showinfo("نجح", "تم تغيير كلمة مرور الواجهة بنجاح!\n\nستحتاج لاستخدام كلمة المرور الجديدة في المرة القادمة.")
                 self.add_log(f"🔐 تم تغيير كلمة مرور الواجهة")
                 
-        except Exception as e:
+                except Exception as e:
             messagebox.showerror("خطأ", f"خطأ في تغيير كلمة مرور الواجهة: {str(e)}")
     
+    def show_about_dialog(self):
+        """Show About dialog with developer information"""
+        try:
+            # Create about window
+            about_window = tk.Toplevel(self.root)
+            about_window.title("ℹ️ حول البرنامج")
+            about_window.geometry("500x600")
+            about_window.configure(bg='#2b2b2b')
+            about_window.transient(self.root)
+            about_window.grab_set()
+            about_window.resizable(False, False)
+            
+            # Center the window
+            about_window.geometry("+%d+%d" % (
+                about_window.winfo_screenwidth()//2 - 250,
+                about_window.winfo_screenheight()//2 - 300
+            ))
+            
+            # Main frame
+            main_frame = tk.Frame(about_window, bg='#2b2b2b')
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+            
+            # App icon/title
+            title_label = tk.Label(
+                main_frame,
+                text="🤖",
+                font=("Arial", 48),
+                fg='#00ff00',
+                bg='#2b2b2b'
+            )
+            title_label.pack(pady=10)
+            
+            # App name
+            app_name_label = tk.Label(
+                main_frame,
+                text="بوت التداول المتقدم",
+                font=("Arial", 20, "bold"),
+                fg='#ffffff',
+                bg='#2b2b2b'
+            )
+            app_name_label.pack(pady=5)
+            
+            # Version
+            version_label = tk.Label(
+                main_frame,
+                text="الإصدار v1.2.0 Enhanced",
+                font=("Arial", 12),
+                fg='#cccccc',
+                bg='#2b2b2b'
+            )
+            version_label.pack(pady=5)
+            
+            # Separator
+            separator1 = tk.Frame(main_frame, height=2, bg='#555555')
+            separator1.pack(fill=tk.X, pady=15)
+            
+            # Developer section
+            dev_title = tk.Label(
+                main_frame,
+                text="👨‍💻 معلومات المطور",
+                font=("Arial", 14, "bold"),
+                fg='#00ff00',
+                bg='#2b2b2b'
+            )
+            dev_title.pack(pady=10)
+            
+            # Developer name
+            dev_name_label = tk.Label(
+                main_frame,
+                text="المطور: Mohamad Zalaf",
+                font=("Arial", 12, "bold"),
+                fg='#ffffff',
+                bg='#2b2b2b'
+            )
+            dev_name_label.pack(pady=5)
+            
+            # Email
+            email_label = tk.Label(
+                main_frame,
+                text="📧 البريد الإلكتروني:",
+                font=("Arial", 10),
+                fg='#cccccc',
+                bg='#2b2b2b'
+            )
+            email_label.pack(pady=2)
+            
+            email_value = tk.Label(
+                main_frame,
+                text="Mohamadzalaf2017@gmail.com",
+                font=("Arial", 11, "bold"),
+                fg='#2196F3',
+                bg='#2b2b2b',
+                cursor="hand2"
+            )
+            email_value.pack(pady=2)
+            
+            # Make email clickable
+            def copy_email(event):
+                about_window.clipboard_clear()
+                about_window.clipboard_append("Mohamadzalaf2017@gmail.com")
+                messagebox.showinfo("تم النسخ", "تم نسخ البريد الإلكتروني إلى الحافظة")
+            
+            email_value.bind("<Button-1>", copy_email)
+            
+            # Separator
+            separator2 = tk.Frame(main_frame, height=2, bg='#555555')
+            separator2.pack(fill=tk.X, pady=15)
+            
+            # Application info
+            app_info_title = tk.Label(
+                main_frame,
+                text="📋 معلومات التطبيق",
+                font=("Arial", 14, "bold"),
+                fg='#00ff00',
+                bg='#2b2b2b'
+            )
+            app_info_title.pack(pady=10)
+            
+            # Features list
+            features_text = """✨ الميزات الرئيسية:
+• واجهة تحكم شاملة لبوت التداول
+• إدارة متقدمة للمستخدمين مع نظام الحظر
+• إعدادات Telegram و Gemini API و MT5
+• نظام حماية متعدد المستويات
+• تضمين كامل للكود المصدري
+• حفظ وإدارة السجلات
+• عدادات وقت التشغيل المزدوجة
+
+🔒 الأمان والحماية:
+• حماية بكلمة مرور للواجهة الرئيسية
+• حماية إضافية لإدارة المستخدمين
+• حماية خاصة لتبويب الحماية والأمان
+• إخفاء المعلومات الحساسة
+
+📅 تاريخ الإصدار: يناير 2025
+©️ جميع الحقوق محفوظة"""
+            
+            features_label = tk.Label(
+                main_frame,
+                text=features_text,
+                font=("Arial", 9),
+                fg='#cccccc',
+                bg='#2b2b2b',
+                justify=tk.LEFT
+            )
+            features_label.pack(pady=10)
+            
+            # Close button
+            close_button = tk.Button(
+                main_frame,
+                text="❌ إغلاق",
+                font=("Arial", 12, "bold"),
+                bg='#666666',
+                fg='white',
+                width=15,
+                command=about_window.destroy
+            )
+            close_button.pack(pady=20)
+            
+            self.add_log("ℹ️ تم عرض نافذة معلومات البرنامج")
+            
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في عرض نافذة حول: {str(e)}")
+     
     def save_config(self):
         """Save configuration to file"""
         try:
