@@ -2323,7 +2323,7 @@ class TradingBotUI:
             # Developer name
             dev_name_label = tk.Label(
                 main_frame,
-                text="المطور: Mohamad Zalaf",
+                text="المطور: Mohamad Zalaf ©2025",
                 font=("Arial", 12, "bold"),
                 fg='#ffffff',
                 bg='#2b2b2b'

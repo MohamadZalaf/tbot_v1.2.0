@@ -30,7 +30,6 @@ def check_dependencies():
         'telebot',
         'pandas', 
         'numpy',
-        'MetaTrader5',
         'google-generativeai',
         'Pillow'
     ]
@@ -47,8 +46,7 @@ def check_dependencies():
                 import pandas
             elif package == 'numpy':
                 import numpy
-            elif package == 'MetaTrader5':
-                import MetaTrader5
+
             elif package == 'google-generativeai':
                 import google.generativeai
             elif package == 'Pillow':
@@ -114,12 +112,12 @@ VSVersionInfo(
       [
       StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName', u'Mohamad Zalaf'),
+        [        StringStruct(u'CompanyName', u'Mohamad Zalaf ©2025'),
         StringStruct(u'FileDescription', u'بوت التداول المتقدم - واجهة التحكم'),
         StringStruct(u'FileVersion', u'1.2.0.0'),
-        StringStruct(u'InternalName', u'TradingBotUI'),
+        StringStruct(u'InternalName', u'TradingBot'),
         StringStruct(u'LegalCopyright', u'Copyright © 2025 Mohamad Zalaf'),
-        StringStruct(u'OriginalFilename', u'TradingBotUI_v1.2.0.exe'),
+        StringStruct(u'OriginalFilename', u'TradingBot 1.2.0.exe'),
         StringStruct(u'ProductName', u'Advanced Trading Bot UI Controller'),
         StringStruct(u'ProductVersion', u'1.2.0.0')])
       ]),
@@ -141,7 +139,7 @@ def build_executable():
         'pyinstaller',
         '--onefile',                    # Single executable file
         '--windowed',                   # No console window
-        '--name=TradingBotUI_v1.2.0',   # Executable name
+        '--name=TradingBot 1.2.0',   # Executable name
         '--distpath=dist',              # Output directory
         '--workpath=build',             # Work directory
         '--clean',                      # Clean cache
@@ -183,10 +181,23 @@ def build_executable():
             print("✅ تم بناء الملف التنفيذي بنجاح!")
             
             # Check if executable was created
-            exe_path = os.path.join('dist', 'TradingBotUI_v1.2.0.exe')
+            exe_path = os.path.join('dist', 'TradingBot 1.2.0.exe')
+            exe_path_linux = os.path.join('dist', 'TradingBot 1.2.0')
+            # Check both Windows and Linux executable paths
             if os.path.exists(exe_path):
-                file_size = os.path.getsize(exe_path) / (1024 * 1024)  # Size in MB
-                print(f"📁 الملف التنفيذي: {exe_path}")
+                current_exe_path = exe_path
+            elif os.path.exists(exe_path_linux):
+                current_exe_path = exe_path_linux
+                # Rename to add .exe extension
+                new_exe_path = exe_path_linux + '.exe'
+                os.rename(exe_path_linux, new_exe_path)
+                current_exe_path = new_exe_path
+            else:
+                current_exe_path = None
+            
+            if current_exe_path:
+                file_size = os.path.getsize(current_exe_path) / (1024 * 1024)  # Size in MB
+                print(f"📁 الملف التنفيذي: {current_exe_path}")
                 print(f"📏 حجم الملف: {file_size:.1f} MB")
                 print(f"🎯 الملف جاهز للاستخدام!")
                 
@@ -196,12 +207,12 @@ def build_executable():
 ===========================================
 
 📋 معلومات الملف التنفيذي:
-• الاسم: TradingBotUI_v1.2.0.exe
+• الاسم: TradingBot 1.2.0.exe
 • الإصدار: 1.2.0
-• المطور: Mohamad Zalaf ©️2025
+• المطور: Mohamad Zalaf ©2025
 
 🚀 طريقة الاستخدام:
-1. شغل الملف التنفيذي TradingBotUI_v1.2.0.exe
+1. شغل الملف التنفيذي TradingBot 1.2.0.exe
 2. أدخل كلمة المرور: 041768454
 3. استخدم واجهة التحكم لإدارة البوت
 
@@ -275,7 +286,7 @@ def main():
         print("\n" + "=" * 50)
         print("🎉 تم الانتهاء من البناء بنجاح!")
         print("📁 الملف التنفيذي متوفر في مجلد: dist/")
-        print("🚀 يمكنك الآن تشغيل: TradingBotUI_v1.2.0.exe")
+        print("🚀 يمكنك الآن تشغيل: TradingBot 1.2.0.exe")
         print("=" * 50)
     else:
         print("\n" + "=" * 50)
