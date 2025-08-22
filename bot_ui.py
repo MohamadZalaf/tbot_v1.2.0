@@ -2251,7 +2251,7 @@ class TradingBotUI:
                 messagebox.showinfo("نجح", "تم تغيير كلمة مرور الواجهة بنجاح!\n\nستحتاج لاستخدام كلمة المرور الجديدة في المرة القادمة.")
                 self.add_log(f"🔐 تم تغيير كلمة مرور الواجهة")
                 
-                except Exception as e:
+        except Exception as e:
             messagebox.showerror("خطأ", f"خطأ في تغيير كلمة مرور الواجهة: {str(e)}")
     
     def show_about_dialog(self):
