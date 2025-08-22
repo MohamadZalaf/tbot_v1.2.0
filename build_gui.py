@@ -130,9 +130,68 @@ VSVersionInfo(
     
     print("📝 تم إنشاء ملف معلومات الإصدار")
 
+def create_icon():
+    """Create icon for the executable"""
+    try:
+        from PIL import Image, ImageDraw
+        
+        # إنشاء صورة 256x256 بخلفية زرقاء
+        size = 256
+        img = Image.new('RGBA', (size, size), (33, 150, 243, 255))
+        draw = ImageDraw.Draw(img)
+        
+        # رسم دائرة خارجية
+        margin = 20
+        draw.ellipse([margin, margin, size-margin, size-margin], 
+                    fill=(25, 118, 210, 255), outline=(13, 71, 161, 255), width=4)
+        
+        # رسم شكل بوت بسيط
+        # رسم مربع للرأس
+        head_size = 80
+        head_x = (size - head_size) // 2
+        head_y = size // 2 - 50
+        draw.rectangle([head_x, head_y, head_x + head_size, head_y + head_size], 
+                      fill=(255, 255, 255, 255), outline=(200, 200, 200, 255), width=3)
+        
+        # رسم العيون
+        eye_size = 12
+        eye1_x = head_x + 20
+        eye2_x = head_x + head_size - 20 - eye_size
+        eye_y = head_y + 25
+        draw.ellipse([eye1_x, eye_y, eye1_x + eye_size, eye_y + eye_size], 
+                    fill=(33, 150, 243, 255))
+        draw.ellipse([eye2_x, eye_y, eye2_x + eye_size, eye_y + eye_size], 
+                    fill=(33, 150, 243, 255))
+        
+        # رسم الفم
+        mouth_y = head_y + 50
+        draw.rectangle([head_x + 25, mouth_y, head_x + head_size - 25, mouth_y + 6], 
+                      fill=(33, 150, 243, 255))
+        
+        # رسم الجسم
+        body_width = 60
+        body_height = 40
+        body_x = (size - body_width) // 2
+        body_y = head_y + head_size + 10
+        draw.rectangle([body_x, body_y, body_x + body_width, body_y + body_height], 
+                      fill=(255, 255, 255, 255), outline=(200, 200, 200, 255), width=3)
+        
+        # حفظ الأيقونة
+        img.save('icon.ico', format='ICO', sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
+        print("🎨 تم إنشاء ملف icon.ico بنجاح")
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ فشل في إنشاء الأيقونة: {e}")
+        return False
+
 def build_executable():
     """Build the executable using PyInstaller"""
     print("🔨 بدء عملية البناء...")
+    
+    # إنشاء الأيقونة أولاً
+    print("🎨 إنشاء أيقونة البوت...")
+    create_icon()
     
     # PyInstaller command with optimized settings
     cmd = [
@@ -146,6 +205,7 @@ def build_executable():
         '--noconfirm',                  # Don't ask for confirmation
         '--optimize=2',                 # Optimize bytecode
         '--version-file=version_info.txt',  # Version info
+        '--icon=icon.ico',              # Icon file
         
         # Hidden imports for all required modules
         '--hidden-import=telebot',
@@ -153,13 +213,31 @@ def build_executable():
         '--hidden-import=telebot.types',
         '--hidden-import=pandas',
         '--hidden-import=numpy',
-        '--hidden-import=MetaTrader5',
         '--hidden-import=google.generativeai',
+        '--hidden-import=google.generativeai.types',
+        '--hidden-import=google.generativeai.types.citation_types',
+        '--hidden-import=google.generativeai.caching',
+        '--hidden-import=google.ai.generativelanguage',
         '--hidden-import=logging.handlers',
         '--hidden-import=tkinter.messagebox',
         '--hidden-import=tkinter.scrolledtext',
         '--hidden-import=tkinter.ttk',
         '--hidden-import=tkinter.simpledialog',
+        
+        # Additional hidden imports for google-generativeai
+        '--hidden-import=google.ai.generativelanguage',
+        '--hidden-import=google.ai.generativelanguage_v1beta',
+        '--hidden-import=google.generativeai.string_utils',
+        '--hidden-import=grpc',
+        '--hidden-import=grpcio',
+        '--hidden-import=google.protobuf',
+        '--hidden-import=google.auth',
+        '--hidden-import=google.auth.transport',
+        '--hidden-import=google.auth.transport.requests',
+        
+        # Collect all submodules for problematic packages
+        '--collect-all=google.generativeai',
+        '--collect-all=google.ai.generativelanguage',
         
         # Exclude unnecessary modules
         '--exclude-module=matplotlib',
