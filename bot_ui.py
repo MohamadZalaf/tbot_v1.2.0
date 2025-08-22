@@ -91,6 +91,21 @@ def load_external_config():
 # Load configuration from external file
 EMBEDDED_CONFIG = load_external_config()
 
+# ===============================================
+# EMBEDDED FILES AS BASE64 (FOR STANDALONE EXE)
+# ===============================================
+
+# Read embedded files
+try:
+    with open('embedded_files.py', 'r', encoding='utf-8') as f:
+        embedded_content = f.read()
+    exec(embedded_content)
+    EMBEDDED_FILES_AVAILABLE = True
+except:
+    EMBEDDED_TBOT_BASE64 = ""
+    EMBEDDED_CONFIG_BASE64 = ""
+    EMBEDDED_FILES_AVAILABLE = False
+
 # Simple embedded icon (bot icon as base64)
 EMBEDDED_ICON = """
 iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAAAlwSFlz
@@ -2562,16 +2577,9 @@ class TradingBotUI:
             self.settings_window.destroy()
     
     def start_bot(self):
-        """Start the external bot file tbot_v1.2.0.py"""
+        """Start the bot using embedded files"""
         if not self.is_logged_in:
             messagebox.showerror("رفض الوصول", "يرجى تسجيل الدخول أولاً!")
-            return
-        
-        # Check if bot file exists
-        bot_file = "tbot_v1.2.0.py"
-        if not os.path.exists(bot_file):
-            self.add_log("❌ ملف البوت غير موجود: tbot_v1.2.0.py")
-            messagebox.showerror("خطأ", "ملف البوت غير موجود: tbot_v1.2.0.py")
             return
         
         # Check if bot is already running
@@ -2580,7 +2588,15 @@ class TradingBotUI:
             return
         
         try:
-            self.add_log("🚀 جاري تشغيل بوت التداول الخارجي...")
+            self.add_log("🚀 جاري تشغيل بوت التداول...")
+            
+            # Create temporary files from embedded data
+            temp_dir = self._create_temp_files()
+            if not temp_dir:
+                self.add_log("❌ فشل في إنشاء الملفات المؤقتة")
+                return
+            
+            bot_file = os.path.join(temp_dir, "tbot_v1.2.0.py")
             
             # Start external bot process
             self.bot_process = subprocess.Popen(
@@ -2589,7 +2605,7 @@ class TradingBotUI:
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
-                cwd=os.getcwd()
+                cwd=temp_dir
             )
             
             # Start thread to read bot output
@@ -2599,7 +2615,7 @@ class TradingBotUI:
             self.status_indicator.config(text="🟢 يعمل", fg='#00ff00')
             self.start_button.config(state='disabled')
             self.stop_button.config(state='normal')
-            self.add_log("✅ تم تشغيل البوت الخارجي بنجاح")
+            self.add_log("✅ تم تشغيل البوت بنجاح")
             
             # Reset start time for uptime counter
             self.bot_start_time = datetime.now()
