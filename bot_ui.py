@@ -475,6 +475,7 @@ class EmbeddedTradingBot:
 
 class TradingBotUI:
     def __init__(self):
+        print("Initializing TradingBotUI...")
         self.embedded_bot = EmbeddedTradingBot(EMBEDDED_CONFIG)
         self.PASSWORD = "041768454"
         self.is_logged_in = False
@@ -486,7 +487,9 @@ class TradingBotUI:
         self.bot_output_thread = None
         
         # Initialize main window
+        print("Setting up main window...")
         self.setup_main_window()
+        print("Main window setup complete.")
         self.create_login_interface()
         self.create_control_interface()
         
@@ -528,11 +531,23 @@ class TradingBotUI:
         """Create small icon for interface use"""
         try:
             from PIL import Image, ImageTk
+            # Check if icon file exists
+            if not os.path.exists('icon.ico'):
+                print("icon.ico not found")
+                self.small_icon = None
+                self.medium_icon = None
+                return
+            
             # Load and resize icon
             icon_image = Image.open('icon.ico')
             # Create different sizes for different uses
             self.small_icon = ImageTk.PhotoImage(icon_image.resize((24, 24), Image.Resampling.LANCZOS))
             self.medium_icon = ImageTk.PhotoImage(icon_image.resize((48, 48), Image.Resampling.LANCZOS))
+            print("Interface icons created successfully")
+        except ImportError as e:
+            print(f"PIL not available, using fallback: {e}")
+            self.small_icon = None
+            self.medium_icon = None
         except Exception as e:
             print(f"Failed to create interface icons: {e}")
             self.small_icon = None
@@ -2388,7 +2403,7 @@ class TradingBotUI:
                     fg='#00ff00',
                     bg='#2b2b2b'
                 )
-                                 title_label.pack(pady=10)
+                title_label.pack(pady=10)
             
             # App name
             app_name_label = tk.Label(
@@ -2816,15 +2831,24 @@ class TradingBotUI:
 
 if __name__ == "__main__":
     try:
+        print("Starting Trading Bot UI...")
         app = TradingBotUI()
+        print("UI initialized successfully, starting main loop...")
         app.run()
     except KeyboardInterrupt:
         print("\n🛑 تم إنهاء التطبيق بواسطة المستخدم")
     except Exception as e:
-        temp_root = tk.Tk()
-        temp_root.withdraw()
-        messagebox.showerror(
-            "خطأ في التطبيق", 
-            f"❌ حدث خطأ في التطبيق:\n\n{str(e)}\n\nيرجى التحقق من تفاصيل الخطأ والمحاولة مرة أخرى."
-        )
-        temp_root.destroy()
+        print(f"Error starting application: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            temp_root = tk.Tk()
+            temp_root.withdraw()
+            messagebox.showerror(
+                "خطأ في التطبيق", 
+                f"❌ حدث خطأ في التطبيق:\n\n{str(e)}\n\nيرجى التحقق من تفاصيل الخطأ والمحاولة مرة أخرى."
+            )
+            temp_root.destroy()
+        except:
+            # If even the error dialog fails, just print the error
+            print(f"Critical error: {e}")

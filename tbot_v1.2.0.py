@@ -2347,54 +2347,6 @@ user_capitals = {}  # رؤوس أموال المستخدمين
 user_states = {}    # حالات المستخدمين
 
 # وظيفة للتحقق من صلاحية المستخدم
-def save_user_info(user_id: int, user_info) -> None:
-    """حفظ معلومات المستخدم في ملف JSON"""
-    try:
-        user_file = os.path.join(USERS_DIR, f"user_{user_id}.json")
-        user_data = {
-            'user_id': str(user_id),
-            'username': user_info.username or 'N/A',
-            'first_name': user_info.first_name or 'N/A',
-            'last_name': user_info.last_name or '',
-            'registration_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'last_activity': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'trading_mode': 'scalping'
-        }
-        
-        # إذا كان الملف موجود، احتفظ بتاريخ التسجيل الأصلي
-        if os.path.exists(user_file):
-            try:
-                with open(user_file, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
-                    user_data['registration_date'] = existing_data.get('registration_date', user_data['registration_date'])
-                    user_data['trading_mode'] = existing_data.get('trading_mode', user_data['trading_mode'])
-            except:
-                pass
-        
-        with open(user_file, 'w', encoding='utf-8') as f:
-            json.dump(user_data, f, ensure_ascii=False, indent=2)
-            
-        logger.debug(f"[USER_INFO] تم حفظ معلومات المستخدم {user_id}")
-        
-    except Exception as e:
-        logger.error(f"[USER_INFO] خطأ في حفظ معلومات المستخدم {user_id}: {e}")
-
-def update_user_activity(user_id: int) -> None:
-    """تحديث آخر نشاط للمستخدم"""
-    try:
-        user_file = os.path.join(USERS_DIR, f"user_{user_id}.json")
-        if os.path.exists(user_file):
-            with open(user_file, 'r', encoding='utf-8') as f:
-                user_data = json.load(f)
-            
-            user_data['last_activity'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            with open(user_file, 'w', encoding='utf-8') as f:
-                json.dump(user_data, f, ensure_ascii=False, indent=2)
-                
-    except Exception as e:
-        logger.error(f"[USER_ACTIVITY] خطأ في تحديث نشاط المستخدم {user_id}: {e}")
-
 def is_user_authenticated(user_id: int) -> bool:
     """التحقق من أن المستخدم مُصرح له بالوصول"""
     return user_sessions.get(user_id, {}).get('authenticated', False)
@@ -2420,9 +2372,6 @@ def require_authentication(func):
                     "🔐 يرجى إدخال كلمة المرور أولاً بكتابة /start"
                 )
                 return
-        
-        # تحديث آخر نشاط للمستخدم
-        update_user_activity(user_id)
         
         return func(message_or_call)
     return wrapper
@@ -2550,13 +2499,12 @@ user_timezones = {}  # المناطق الزمنية للمستخدمين
 
 # مجلدات تخزين البيانات
 DATA_DIR = "trading_data"
-USERS_DIR = os.path.join(DATA_DIR, "users")
 FEEDBACK_DIR = os.path.join(DATA_DIR, "user_feedback")
 TRADE_LOGS_DIR = os.path.join(DATA_DIR, "trade_logs")
 CHAT_LOGS_DIR = os.path.join(DATA_DIR, "chat_logs")
 
 # إنشاء المجلدات إذا لم تكن موجودة
-for directory in [DATA_DIR, USERS_DIR, FEEDBACK_DIR, TRADE_LOGS_DIR, CHAT_LOGS_DIR]:
+for directory in [DATA_DIR, FEEDBACK_DIR, TRADE_LOGS_DIR, CHAT_LOGS_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # رسائل تحذير للمكتبات المفقودة
@@ -10266,9 +10214,6 @@ def handle_password(message):
     user_id = message.from_user.id
     
     if message.text == BOT_PASSWORD:
-        # حفظ معلومات المستخدم
-        save_user_info(user_id, message.from_user)
-        
         user_sessions[user_id] = {
             'authenticated': True,
             'trading_mode': 'scalping',
