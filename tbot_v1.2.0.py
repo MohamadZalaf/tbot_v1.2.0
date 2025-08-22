@@ -2346,6 +2346,100 @@ user_sessions = {}  # تتبع جلسات المستخدمين
 user_capitals = {}  # رؤوس أموال المستخدمين
 user_states = {}    # حالات المستخدمين
 
+# ملف مشاركة البيانات مع bot_ui.py
+SHARED_USER_DATA_FILE = os.path.join(DATA_DIR, "active_users.json")
+
+def save_user_session_data():
+    """حفظ بيانات جلسات المستخدمين لمشاركتها مع bot_ui.py"""
+    try:
+        # إنشاء مجلد البيانات إذا لم يكن موجوداً
+        os.makedirs(DATA_DIR, exist_ok=True)
+        
+        # تحضير بيانات المستخدمين للحفظ
+        users_data = []
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        for user_id, session in user_sessions.items():
+            if session.get('authenticated', False):
+                user_data = {
+                    'user_id': str(user_id),
+                    'username': session.get('username', 'Unknown'),
+                    'first_name': session.get('first_name', f'User {user_id}'),
+                    'last_name': session.get('last_name', ''),
+                    'login_time': session.get('login_time', current_time),
+                    'last_activity': current_time,
+                    'trading_mode': session.get('trading_mode', 'scalping'),
+                    'notification_settings': session.get('notification_settings', {}),
+                    'authenticated': True,
+                    'session_active': True
+                }
+                users_data.append(user_data)
+        
+        # حفظ البيانات في ملف JSON
+        with open(SHARED_USER_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump({
+                'last_update': current_time,
+                'active_users_count': len(users_data),
+                'users': users_data
+            }, f, ensure_ascii=False, indent=2)
+        
+        logger.debug(f"[USER_DATA] تم حفظ بيانات {len(users_data)} مستخدم نشط في {SHARED_USER_DATA_FILE}")
+        
+    except Exception as e:
+        logger.error(f"[USER_DATA] خطأ في حفظ بيانات المستخدمين: {e}")
+
+def update_user_session_info(user_id, username=None, first_name=None, last_name=None):
+    """تحديث معلومات المستخدم في الجلسة وحفظها"""
+    try:
+        if user_id not in user_sessions:
+            user_sessions[user_id] = {}
+        
+        # تحديث المعلومات إذا تم توفيرها
+        if username:
+            user_sessions[user_id]['username'] = username
+        if first_name:
+            user_sessions[user_id]['first_name'] = first_name
+        if last_name:
+            user_sessions[user_id]['last_name'] = last_name
+        
+        # تحديث وقت آخر نشاط
+        user_sessions[user_id]['last_activity'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # حفظ البيانات المحدثة
+        save_user_session_data()
+        
+    except Exception as e:
+        logger.error(f"[USER_UPDATE] خطأ في تحديث بيانات المستخدم {user_id}: {e}")
+
+def cleanup_inactive_sessions():
+    """تنظيف الجلسات غير النشطة (اختياري)"""
+    try:
+        current_time = datetime.now()
+        inactive_users = []
+        
+        for user_id, session in user_sessions.items():
+            last_activity = session.get('last_activity')
+            if last_activity:
+                try:
+                    last_time = datetime.strptime(last_activity, '%Y-%m-%d %H:%M:%S')
+                    # إزالة المستخدمين غير النشطين لأكثر من 24 ساعة
+                    if (current_time - last_time).total_seconds() > 86400:  # 24 hours
+                        inactive_users.append(user_id)
+                except Exception:
+                    continue
+        
+        # إزالة المستخدمين غير النشطين
+        for user_id in inactive_users:
+            if user_id in user_sessions:
+                del user_sessions[user_id]
+        
+        if inactive_users:
+            logger.info(f"[CLEANUP] تم تنظيف {len(inactive_users)} جلسة غير نشطة")
+            save_user_session_data()
+            
+    except Exception as e:
+        logger.error(f"[CLEANUP] خطأ في تنظيف الجلسات: {e}")
+
 # وظيفة للتحقق من صلاحية المستخدم
 def is_user_authenticated(user_id: int) -> bool:
     """التحقق من أن المستخدم مُصرح له بالوصول"""
@@ -10214,11 +10308,23 @@ def handle_password(message):
     user_id = message.from_user.id
     
     if message.text == BOT_PASSWORD:
+        # حفظ معلومات المستخدم
+        username = message.from_user.username
+        first_name = message.from_user.first_name
+        last_name = message.from_user.last_name
+        
         user_sessions[user_id] = {
             'authenticated': True,
             'trading_mode': 'scalping',
-            'notification_settings': get_user_advanced_notification_settings(user_id)
+            'notification_settings': get_user_advanced_notification_settings(user_id),
+            'username': username,
+            'first_name': first_name,
+            'last_name': last_name,
+            'login_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
+        
+        # حفظ بيانات المستخدمين للمشاركة مع bot_ui.py
+        save_user_session_data()
         
         # إجبار سؤال رأس المال لجميع المستخدمين بعد كلمة المرور
         user_states[user_id] = 'waiting_initial_capital'
@@ -13075,6 +13181,15 @@ def handle_unknown_message(message):
     """معالج الرسائل غير المعرفة - يتحقق من كلمة السر أولاً"""
     user_id = message.from_user.id
     
+    # تحديث معلومات المستخدم إذا كان مصادق عليه
+    if user_id in user_sessions and user_sessions[user_id].get('authenticated', False):
+        update_user_session_info(
+            user_id, 
+            message.from_user.username, 
+            message.from_user.first_name,
+            message.from_user.last_name
+        )
+    
     # التحقق من كلمة السر أولاً
     if user_id not in user_sessions:
         # إذا لم يكن المستخدم في حالة انتظار كلمة السر، ضعه في هذه الحالة
@@ -13872,12 +13987,36 @@ if __name__ == "__main__":
         monitoring_thread.start()
         logger.info("[RUNNING] تم بدء حلقة المراقبة في الخلفية")
         
-        # التحقق من بدء الـ thread بنجاح
+        # بدء خيط حفظ بيانات المستخدمين
+        def user_data_saver_loop():
+            """حلقة حفظ بيانات المستخدمين كل 30 ثانية"""
+            while monitoring_active:
+                try:
+                    save_user_session_data()
+                    time.sleep(30)  # حفظ كل 30 ثانية
+                except Exception as e:
+                    logger.error(f"[USER_SAVER] خطأ في حفظ بيانات المستخدمين: {e}")
+                    time.sleep(60)  # انتظار أطول في حالة الخطأ
+        
+        user_data_thread = threading.Thread(
+            target=user_data_saver_loop,
+            daemon=True,
+            name="UserDataSaver"
+        )
+        user_data_thread.start()
+        logger.info("[RUNNING] تم بدء خيط حفظ بيانات المستخدمين")
+        
+        # التحقق من بدء الـ threads بنجاح
         time.sleep(1)
         if monitoring_thread.is_alive():
             logger.info("[OK] خيط المراقبة يعمل بشكل صحيح")
         else:
             logger.error("[ERROR] فشل في بدء خيط المراقبة")
+            
+        if user_data_thread.is_alive():
+            logger.info("[OK] خيط حفظ بيانات المستخدمين يعمل بشكل صحيح")
+        else:
+            logger.error("[ERROR] فشل في بدء خيط حفظ بيانات المستخدمين")
         
         # بدء البوت
         logger.info("[SYSTEM] البوت جاهز للعمل!")

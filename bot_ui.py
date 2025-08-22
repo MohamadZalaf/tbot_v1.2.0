@@ -4,7 +4,7 @@
 """
 🤖 Trading Bot UI Controller v1.2.0 - ENHANCED EMBEDDED VERSION
 ==============================================================
-Arabic GUI Interface for Advanced Trading Bot Control with Full Embedding
+English GUI Interface for Advanced Trading Bot Control with Full Embedding
 
 Features:
 - Complete bot code embedding (no external .py files needed)
@@ -18,6 +18,13 @@ Features:
 Developer: Mohamad Zalaf ©️2025
 Compatible with: Embedded tbot_v1.2.0.py + config.py
 """
+
+# Hide console window on Windows
+import sys
+import os
+if os.name == 'nt':  # Windows
+    import ctypes
+    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk, simpledialog
@@ -64,7 +71,7 @@ def load_external_config():
                 'DEFAULT_CAPITAL_OPTIONS': getattr(config, 'DEFAULT_CAPITAL_OPTIONS', [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000])
             }
     except Exception as e:
-        print(f"⚠️ خطأ في تحميل config.py: {e}")
+        print(f"⚠️ Error loading config.py: {e}")
         
     # Fallback to embedded config
     return {
@@ -102,6 +109,255 @@ G1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sL
 G1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sL
 G1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sL
 """
+
+# ===============================================
+# UTILITY FUNCTIONS FOR READING USER DATA
+# ===============================================
+
+def get_all_user_data_sources():
+    """Get user data from all possible sources used by tbot_v1.2.0.py"""
+    try:
+        users_data = []
+        
+        # 1. Read from shared active users file (highest priority - real-time data)
+        shared_file = "trading_data/active_users.json"
+        if os.path.exists(shared_file):
+            try:
+                with open(shared_file, 'r', encoding='utf-8') as f:
+                    shared_data = json.load(f)
+                
+                active_users = shared_data.get('users', [])
+                for user in active_users:
+                    user_info = {
+                        'user_id': str(user['user_id']),
+                        'username': user.get('username', 'Unknown'),
+                        'first_name': user.get('first_name', f"User {user['user_id']}"),
+                        'last_name': user.get('last_name', ''),
+                        'registration_date': user.get('login_time', 'Unknown'),
+                        'last_activity': user.get('last_activity', 'Unknown'),
+                        'trading_mode': user.get('trading_mode', 'Unknown'),
+                        'is_banned': False,  # Will be checked later
+                        'source': 'active_session'
+                    }
+                    users_data.append(user_info)
+                    
+                print(f"✅ Loaded {len(active_users)} active users from shared file")
+                
+            except Exception as e:
+                print(f"Error reading shared user data: {e}")
+        
+        # 2. Try to read from running bot's log file as fallback
+        try:
+            if os.path.exists('advanced_trading_bot_v1.2.0.log'):
+                with open('advanced_trading_bot_v1.2.0.log', 'r', encoding='utf-8') as f:
+                    log_lines = f.readlines()
+                    
+                # Extract user data from recent log entries
+                for line in reversed(log_lines[-500:]):  # Check last 500 lines
+                    if 'User data saved for' in line or 'authenticated successfully' in line:
+                        try:
+                            # Extract user ID from log
+                            import re
+                            user_match = re.search(r'(?:User data saved for|authenticated successfully for user) (\d+)', line)
+                            if user_match:
+                                user_id = user_match.group(1)
+                                # Check if we already have this user
+                                if not any(u['user_id'] == user_id for u in users_data):
+                                    user_info = {
+                                        'user_id': user_id,
+                                        'username': 'Log User',
+                                        'first_name': f'User {user_id}',
+                                        'last_name': '',
+                                        'registration_date': line.split(' - ')[0] if ' - ' in line else 'Unknown',
+                                        'last_activity': line.split(' - ')[0] if ' - ' in line else 'Unknown',
+                                        'trading_mode': 'Unknown',
+                                        'is_banned': False,
+                                        'source': 'bot_log'
+                                    }
+                                    users_data.append(user_info)
+                        except Exception:
+                            continue
+        except Exception as e:
+            print(f"Could not read bot log: {e}")
+        
+        # 3. Read from user feedback files (trading_data/user_feedback_*.json)
+        feedback_files = glob.glob("trading_data/user_feedback_*.json")
+        for feedback_file in feedback_files:
+            try:
+                user_id = feedback_file.split('user_feedback_')[1].split('.json')[0]
+                if user_id.isdigit():
+                    # Check if we already have this user from logs
+                    existing_user = next((u for u in users_data if u['user_id'] == user_id), None)
+                    if existing_user:
+                        # Update existing user with more detailed data
+                        with open(feedback_file, 'r', encoding='utf-8') as f:
+                            feedback_data = json.load(f)
+                        existing_user.update({
+                            'username': feedback_data.get('username', existing_user['username']),
+                            'first_name': feedback_data.get('first_name', existing_user['first_name']),
+                            'last_name': feedback_data.get('last_name', ''),
+                            'registration_date': feedback_data.get('join_date', existing_user['registration_date']),
+                            'last_activity': feedback_data.get('last_active', existing_user['last_activity']),
+                            'trading_mode': feedback_data.get('trading_mode', existing_user['trading_mode']),
+                            'source': 'feedback_enhanced'
+                        })
+                    else:
+                        # Add new user from feedback
+                        with open(feedback_file, 'r', encoding='utf-8') as f:
+                            feedback_data = json.load(f)
+                        
+                        user_info = {
+                            'user_id': user_id,
+                            'username': feedback_data.get('username', 'Unknown'),
+                            'first_name': feedback_data.get('first_name', 'Unknown'),
+                            'last_name': feedback_data.get('last_name', ''),
+                            'registration_date': feedback_data.get('join_date', 'Unknown'),
+                            'last_activity': feedback_data.get('last_active', 'Unknown'),
+                            'trading_mode': feedback_data.get('trading_mode', 'Unknown'),
+                            'is_banned': False,  # Will be checked later
+                            'source': 'feedback'
+                        }
+                        users_data.append(user_info)
+            except Exception as e:
+                print(f"Error reading feedback file {feedback_file}: {e}")
+                continue
+        
+        # 4. Read from trade logs (trading_data/trade_logs/)
+        if os.path.exists("trading_data/trade_logs"):
+            trade_files = glob.glob("trading_data/trade_logs/*.json")
+            for trade_file in trade_files:
+                try:
+                    with open(trade_file, 'r', encoding='utf-8') as f:
+                        trade_data = json.load(f)
+                    
+                    user_id = str(trade_data.get('user_id', ''))
+                    if user_id and user_id.isdigit():
+                        # Check if user already exists in our list
+                        existing_user = next((u for u in users_data if u['user_id'] == user_id), None)
+                        if not existing_user:
+                            user_info = {
+                                'user_id': user_id,
+                                'username': trade_data.get('username', 'غير محدد'),
+                                'first_name': trade_data.get('first_name', 'غير محدد'),
+                                'last_name': '',
+                                'registration_date': trade_data.get('timestamp', 'غير محدد')[:10] if trade_data.get('timestamp') else 'غير محدد',
+                                'last_activity': trade_data.get('timestamp', 'غير محدد'),
+                                'trading_mode': 'غير محدد',
+                                'is_banned': False,
+                                'source': 'trade_logs'
+                            }
+                            users_data.append(user_info)
+                except Exception as e:
+                    continue
+        
+        # 5. Read from old users directory if it exists (backward compatibility)
+        if os.path.exists("trading_data/users"):
+            user_files = glob.glob("trading_data/users/user_*.json")
+            for user_file in user_files:
+                try:
+                    user_id = os.path.basename(user_file).replace('user_', '').replace('.json', '')
+                    if user_id.isdigit():
+                        # Check if user already exists
+                        existing_user = next((u for u in users_data if u['user_id'] == user_id), None)
+                        if not existing_user:
+                            with open(user_file, 'r', encoding='utf-8') as f:
+                                user_data = json.load(f)
+                            
+                            user_info = {
+                                'user_id': user_id,
+                                'username': user_data.get('username', 'غير محدد'),
+                                'first_name': user_data.get('first_name', 'غير محدد'),
+                                'last_name': user_data.get('last_name', ''),
+                                'registration_date': user_data.get('registration_date', user_data.get('join_date', 'غير محدد')),
+                                'last_activity': user_data.get('last_activity', user_data.get('last_active', 'غير محدد')),
+                                'trading_mode': user_data.get('trading_mode', 'غير محدد'),
+                                'is_banned': False,
+                                'source': 'users_dir'
+                            }
+                            users_data.append(user_info)
+                except Exception as e:
+                    continue
+        
+        # Check banned status for all users
+        banned_users = set()
+        banned_file = "trading_data/banned_users.json"
+        if os.path.exists(banned_file):
+            try:
+                with open(banned_file, 'r', encoding='utf-8') as f:
+                    banned_users = set(json.load(f))
+            except Exception as e:
+                print(f"Error reading banned users: {e}")
+        
+        # Update banned status
+        for user in users_data:
+            user['is_banned'] = user['user_id'] in banned_users
+        
+        # Remove duplicates based on user_id
+        seen_ids = set()
+        unique_users = []
+        for user in users_data:
+            if user['user_id'] not in seen_ids:
+                seen_ids.add(user['user_id'])
+                unique_users.append(user)
+        
+        return unique_users
+        
+    except Exception as e:
+        print(f"Error getting user data: {e}")
+        return []
+
+def delete_user_from_bot_memory(user_id):
+    """Delete user from bot memory - removes all traces as if it's the first time using the bot"""
+    try:
+        user_id = str(user_id)
+        deleted_files = []
+        
+        # 1. Delete user feedback file
+        feedback_file = f"trading_data/user_feedback_{user_id}.json"
+        if os.path.exists(feedback_file):
+            os.remove(feedback_file)
+            deleted_files.append(feedback_file)
+        
+        # 2. Delete user trade logs
+        if os.path.exists("trading_data/trade_logs"):
+            trade_files = glob.glob("trading_data/trade_logs/*.json")
+            for trade_file in trade_files:
+                try:
+                    with open(trade_file, 'r', encoding='utf-8') as f:
+                        trade_data = json.load(f)
+                    
+                    if str(trade_data.get('user_id', '')) == user_id:
+                        os.remove(trade_file)
+                        deleted_files.append(trade_file)
+                except Exception:
+                    continue
+        
+        # 3. Delete from old users directory if exists
+        old_user_file = f"trading_data/users/user_{user_id}.json"
+        if os.path.exists(old_user_file):
+            os.remove(old_user_file)
+            deleted_files.append(old_user_file)
+        
+        # 4. Remove from banned users if present
+        banned_file = "trading_data/banned_users.json"
+        if os.path.exists(banned_file):
+            try:
+                with open(banned_file, 'r', encoding='utf-8') as f:
+                    banned_users = set(json.load(f))
+                
+                if user_id in banned_users:
+                    banned_users.remove(user_id)
+                    with open(banned_file, 'w', encoding='utf-8') as f:
+                        json.dump(list(banned_users), f, ensure_ascii=False, indent=2)
+                    deleted_files.append(f"{banned_file} (removed from banned list)")
+            except Exception as e:
+                print(f"Error updating banned users: {e}")
+        
+        return True, deleted_files
+        
+    except Exception as e:
+        print(f"Error deleting user {user_id}: {e}")
+        return False, []
 
 # ===============================================
 # EMBEDDED BOT CLASS
@@ -227,13 +483,11 @@ class EmbeddedTradingBot:
         return str(user_id) in self.banned_users
         
     def get_users_count(self):
-        """Get total number of users from JSON files"""
+        """Get total number of users from all data sources"""
         try:
-            user_files = glob.glob(os.path.join(USERS_DIR, "user_*.json"))
-            count = len(user_files)
+            users_data = get_all_user_data_sources()
+            count = len(users_data)
             if count == 0:
-                # Check if any users have been saved by the bot
-                # If no users directory or files exist, return a message
                 return "No users data"
             return count
         except Exception as e:
@@ -241,39 +495,40 @@ class EmbeddedTradingBot:
             return "Error"
     
     def get_users_details(self):
-        """Get detailed information about all users"""
+        """Get detailed information about all users from all data sources"""
         try:
-            users_details = []
-            user_files = glob.glob(os.path.join(USERS_DIR, "user_*.json"))
+            users_details = get_all_user_data_sources()
             
-            for user_file in user_files:
-                try:
-                    with open(user_file, 'r', encoding='utf-8') as f:
-                        user_data = json.load(f)
-                        
-                    user_id = os.path.basename(user_file).replace('user_', '').replace('.json', '')
-                    
-                    users_details.append({
-                        'user_id': user_id,
-                        'username': user_data.get('username', 'غير محدد'),
-                        'first_name': user_data.get('first_name', 'غير محدد'),
-                        'last_name': user_data.get('last_name', ''),
-                        'registration_date': user_data.get('registration_date', user_data.get('join_date', 'غير محدد')),
-                        'last_activity': user_data.get('last_activity', user_data.get('last_active', 'غير محدد')),
-                        'trading_mode': user_data.get('trading_mode', 'غير محدد'),
-                        'is_banned': self.is_user_banned(user_id)
-                    })
-                    
-                except Exception as e:
-                    self.logger.error(f"Error reading user file {user_file}: {e}")
-                    continue
+            # Update banned status using our own banned users system
+            for user in users_details:
+                user['is_banned'] = self.is_user_banned(user['user_id'])
             
+            # Sort by user_id
             users_details.sort(key=lambda x: int(x['user_id']) if x['user_id'].isdigit() else 0)
             return users_details
             
         except Exception as e:
             self.logger.error(f"Error getting users details: {e}")
             return []
+    
+    def delete_user_from_memory(self, user_id):
+        """Delete user from bot memory completely"""
+        try:
+            success, deleted_files = delete_user_from_bot_memory(user_id)
+            if success:
+                # Also remove from our own banned list if present
+                user_id_str = str(user_id)
+                if user_id_str in self.banned_users:
+                    self.banned_users.remove(user_id_str)
+                    self.save_banned_users()
+                
+                self.logger.info(f"User {user_id} deleted from bot memory. Files deleted: {deleted_files}")
+                return True, deleted_files
+            else:
+                return False, []
+        except Exception as e:
+            self.logger.error(f"Error deleting user {user_id} from memory: {e}")
+            return False, []
     
     def load_user_data(self, user_id):
         """Load user data from JSON file"""
@@ -508,7 +763,7 @@ class TradingBotUI:
         """Setup main application window"""
         self.root = tk.Tk()
         self.root.title("🤖 Advanced Trading Bot v1.2.0 - Control Interface")
-        self.root.geometry("850x750")
+        self.root.geometry("850x850")
         self.root.resizable(False, False)  # Prevent resizing but allow moving
         
         # Set icon
@@ -545,9 +800,10 @@ class TradingBotUI:
             
             # Load and resize icon
             icon_image = Image.open('icon.ico')
-            # Create different sizes for different uses (increased sizes)
+            # Create different sizes for different uses (increased sizes for login screen)
             self.small_icon = ImageTk.PhotoImage(icon_image.resize((32, 32), Image.Resampling.LANCZOS))
-            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((64, 64), Image.Resampling.LANCZOS))
+            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((96, 96), Image.Resampling.LANCZOS))
+            self.large_icon = ImageTk.PhotoImage(icon_image.resize((128, 128), Image.Resampling.LANCZOS))
             print("Interface icons created successfully")
         except ImportError as e:
             print(f"PIL not available, using fallback: {e}")
@@ -574,6 +830,16 @@ class TradingBotUI:
                 bg='#2b2b2b'
             )
             icon_label.pack(pady=(20, 10))
+        else:
+            # Create a larger text-based icon if no image available
+            large_icon_label = tk.Label(
+                self.login_frame,
+                text="🤖",
+                font=("Arial", 80),
+                fg='#00ff00',
+                bg='#2b2b2b'
+            )
+            large_icon_label.pack(pady=(20, 10))
         
         title_label = tk.Label(
             self.login_frame,
@@ -711,9 +977,9 @@ class TradingBotUI:
         # Logout button
         logout_button = tk.Button(
             header_frame,
-            text="🚪 خروج",
+            text="🚪 Logout",
             font=("Arial", 10),
-            bg='#666666',
+            bg='#ff4444',
             fg='white',
             command=self.logout
         )
@@ -805,7 +1071,7 @@ class TradingBotUI:
         
         save_logs_button = tk.Button(
             log_controls_frame,
-            text="💾 حفظ السجل كملف TXT",
+            text="💾 Save Log as TXT",
             font=("Arial", 10, "bold"),
             bg='#FF9800',
             fg='white',
@@ -815,7 +1081,7 @@ class TradingBotUI:
         
         clear_logs_button = tk.Button(
             log_controls_frame,
-            text="🧹 مسح السجل",
+            text="🧹 Clear Log",
             font=("Arial", 10, "bold"),
             bg='#f44336',
             fg='white',
@@ -841,7 +1107,7 @@ class TradingBotUI:
         # Uptime counters (bottom left)
         self.uptime_label = tk.Label(
             bottom_frame,
-            text="⏱️ وقت تشغيل الواجهة: 00:00:00",
+            text="⏱️ Interface Uptime: 00:00:00",
             font=("Arial", 10),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -850,7 +1116,7 @@ class TradingBotUI:
         
         self.bot_uptime_label = tk.Label(
             bottom_frame,
-            text="🤖 وقت تشغيل البوت: متوقف",
+            text="🤖 Bot Uptime: Stopped",
             font=("Arial", 10),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -864,10 +1130,10 @@ class TradingBotUI:
         self.update_bot_uptime()
         
         # Add initial log messages
-        self.add_log("🔧 تم تهيئة واجهة التحكم في البوت - إصدار مدمج كامل")
-        self.add_log("ℹ️  يستخدم نظام ملفات JSON الأصلي")
-        self.add_log("📁 المستخدمون محفوظون في: trading_data/users/")
-        self.add_log("🔐 يرجى تسجيل الدخول للوصول إلى عناصر التحكم")
+        self.add_log("🔧 Bot control interface initialized - Full embedded version")
+        self.add_log("ℹ️  Using original JSON file system")
+        self.add_log("📁 Users saved in: trading_data/users/")
+        self.add_log("🔐 Please log in to access controls")
     
     def show_users_management_window(self):
         """Show users management window with password protection"""
@@ -973,6 +1239,17 @@ class TradingBotUI:
             command=lambda: self.unban_selected_user(users_tree)
         )
         unban_button.pack(side=tk.LEFT, padx=5)
+        
+        # Delete user from memory button
+        delete_memory_button = tk.Button(
+            action_frame,
+            text="🗑️ حذف من الذاكرة",
+            font=("Arial", 10, "bold"),
+            bg='#FF5722',
+            fg='white',
+            command=lambda: self.delete_selected_user_from_memory(users_tree)
+        )
+        delete_memory_button.pack(side=tk.LEFT, padx=5)
         
         # Refresh button
         refresh_button = tk.Button(
@@ -1091,6 +1368,86 @@ class TradingBotUI:
         except Exception as e:
             messagebox.showerror("خطأ", f"خطأ في إلغاء حظر المستخدم: {str(e)}")
     
+    def delete_selected_user_from_memory(self, tree):
+        """Delete selected user from bot memory completely"""
+        try:
+            selection = tree.selection()
+            if not selection:
+                messagebox.showwarning("تحذير", "يرجى تحديد مستخدم أولاً")
+                return
+            
+            item = selection[0]
+            user_id = tree.item(item)['values'][0]
+            username = tree.item(item)['values'][1]
+            
+            # Show warning dialog
+            warning_result = messagebox.askyesno(
+                "⚠️ تحذير مهم",
+                f"هذا الإجراء سيحذف المستخدم من ذاكرة البوت نهائياً!\n\n"
+                f"المستخدم: {username} (ID: {user_id})\n\n"
+                f"سيتم حذف:\n"
+                f"• جميع بيانات المستخدم\n"
+                f"• سجلات الصفقات\n"
+                f"• التقييمات والملاحظات\n"
+                f"• حالة الحظر (إن وجدت)\n\n"
+                f"بعد الحذف، سيتعامل البوت مع هذا المستخدم وكأنه يستخدمه لأول مرة.\n\n"
+                f"هل أنت متأكد من المتابعة؟",
+                icon='warning'
+            )
+            
+            if not warning_result:
+                return
+            
+            # Second confirmation
+            final_result = messagebox.askyesno(
+                "تأكيد نهائي",
+                f"تأكيد أخير: حذف المستخدم {username} (ID: {user_id}) من الذاكرة نهائياً؟",
+                icon='question'
+            )
+            
+            if final_result:
+                # Show progress
+                progress_window = tk.Toplevel(self.root)
+                progress_window.title("جاري الحذف...")
+                progress_window.geometry("400x150")
+                progress_window.configure(bg='#2b2b2b')
+                progress_window.transient(self.root)
+                progress_window.grab_set()
+                
+                progress_label = tk.Label(
+                    progress_window,
+                    text=f"🗑️ جاري حذف المستخدم {username}...",
+                    font=("Arial", 12),
+                    fg='#ffffff',
+                    bg='#2b2b2b'
+                )
+                progress_label.pack(expand=True)
+                
+                progress_window.update()
+                
+                # Perform deletion
+                success, deleted_files = self.embedded_bot.delete_user_from_memory(user_id)
+                
+                progress_window.destroy()
+                
+                if success:
+                    # Show success message with details
+                    files_list = "\n".join(deleted_files) if deleted_files else "لم يتم العثور على ملفات للحذف"
+                    success_message = f"✅ تم حذف المستخدم {username} من ذاكرة البوت بنجاح!\n\n"
+                    success_message += f"الملفات المحذوفة:\n{files_list}\n\n"
+                    success_message += "المستخدم الآن كما لو أنه يستخدم البوت لأول مرة."
+                    
+                    messagebox.showinfo("نجح الحذف", success_message)
+                    self.refresh_users_management(tree)
+                    self.add_log(f"🗑️ تم حذف المستخدم {username} (ID: {user_id}) من ذاكرة البوت نهائياً")
+                    if deleted_files:
+                        self.add_log(f"📁 ملفات محذوفة: {len(deleted_files)} ملف")
+                else:
+                    messagebox.showerror("فشل الحذف", f"فشل في حذف المستخدم {username} من الذاكرة")
+                    
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في حذف المستخدم من الذاكرة: {str(e)}")
+    
     def show_settings_window(self):
         """Show settings window with password protection"""
         # Ask for password
@@ -1121,6 +1478,9 @@ class TradingBotUI:
         notebook = ttk.Notebook(self.settings_window)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
+        # General tab (first tab with bot commands)
+        self.create_general_tab(notebook)
+        
         # Configurations tab
         self.create_configurations_tab(notebook)
         
@@ -1145,6 +1505,321 @@ class TradingBotUI:
             height=1
         )
         exit_button.pack(side=tk.RIGHT)
+    
+    def create_general_tab(self, notebook):
+        """Create general tab with bot commands"""
+        general_frame = tk.Frame(notebook, bg='#2b2b2b')
+        notebook.add(general_frame, text="🔧 General")
+        
+        # Main scrollable frame
+        canvas = tk.Canvas(general_frame, bg='#2b2b2b')
+        scrollbar = ttk.Scrollbar(general_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg='#2b2b2b')
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Create centered container for all sections
+        centered_container = tk.Frame(scrollable_frame, bg='#2b2b2b')
+        centered_container.pack(expand=True, pady=10)
+        
+        # Add padding frame to center content
+        content_frame = tk.Frame(centered_container, bg='#2b2b2b')
+        content_frame.pack(expand=True, padx=50)
+        
+        # Title
+        title_label = tk.Label(
+            content_frame,
+            text="🔧 General Settings and Bot Commands",
+            font=("Arial", 16, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        title_label.pack(pady=10)
+        
+        # Bot Commands Section
+        commands_frame = tk.LabelFrame(
+            content_frame,
+            text="🤖 Available Bot Commands",
+            font=("Arial", 12, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        commands_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        # Developer Commands
+        dev_commands_frame = tk.LabelFrame(
+            commands_frame,
+            text="👨‍💻 Developer Commands",
+            font=("Arial", 11, "bold"),
+            fg='#ffaa00',
+            bg='#2b2b2b'
+        )
+        dev_commands_frame.pack(pady=10, padx=10, fill=tk.X)
+        
+        dev_commands = [
+            ("/clear_cache", "Clear cache manually", "🧹"),
+            ("/mt5_debug", "Detailed MT5 diagnostics", "🔍"),
+            ("/mt5_reconnect", "Reconnect to MT5", "🔄"),
+            ("/set_mt5_path", "Set MT5 path", "📁"),
+            ("/api_status", "Check API status", "📊"),
+            ("/api_reset", "Reset API status", "🔄"),
+            ("/switch_notification_length", "Toggle notification length", "📏"),
+            ("/switch_msg_length", "Toggle message length", "📝"),
+            ("/renew_api_context", "Renew API context", "🔄"),
+            ("/switch_hz", "Change monitoring frequency", "⏱️")
+        ]
+        
+        # Create grid for developer commands
+        row = 0
+        for cmd, desc, emoji in dev_commands:
+            cmd_frame = tk.Frame(dev_commands_frame, bg='#2b2b2b')
+            cmd_frame.pack(fill=tk.X, padx=5, pady=2)
+            
+            # Create clickable button for the entire command
+            def create_command_handler(command):
+                return lambda: self.execute_bot_command(command)
+            
+            cmd_button = tk.Button(
+                cmd_frame,
+                text=f"{emoji} {cmd} - {desc}",
+                font=("Arial", 10),
+                fg='#ffffff',
+                bg='#404040',
+                activebackground='#505050',
+                activeforeground='#ffffff',
+                relief='flat',
+                anchor='w',
+                command=create_command_handler(cmd)
+            )
+            cmd_button.pack(fill=tk.X, padx=2, pady=1)
+            
+            # Add hover effect
+            def on_enter(e, button=cmd_button):
+                button.config(bg='#505050')
+            def on_leave(e, button=cmd_button):
+                button.config(bg='#404040')
+                
+            cmd_button.bind("<Enter>", on_enter)
+            cmd_button.bind("<Leave>", on_leave)
+            
+            row += 1
+        
+        # User Commands Section
+        user_commands_frame = tk.LabelFrame(
+            commands_frame,
+            text="👤 User Commands",
+            font=("Arial", 11, "bold"),
+            fg='#00ff00',
+            bg='#2b2b2b'
+        )
+        user_commands_frame.pack(pady=10, padx=10, fill=tk.X)
+        
+        # Note about /start command
+        start_note = tk.Label(
+            user_commands_frame,
+            text="📝 Note: /start command is available for users to begin using the bot",
+            font=("Arial", 10, "italic"),
+            fg='#ffaa00',
+            bg='#2b2b2b'
+        )
+        start_note.pack(pady=10, padx=5)
+        
+        # Bot Features Section
+        features_frame = tk.LabelFrame(
+            content_frame,
+            text="⚡ Main Bot Features",
+            font=("Arial", 12, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        features_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        features_list = [
+            ("🔄", "Market Analysis", "Real-time analysis of currencies and stocks"),
+            ("💰", "Live Prices", "Live prices from MetaTrader5"),
+            ("📈", "Trading Recommendations", "Smart recommendations with AI"),
+            ("⚙️", "Settings", "Customize user experience"),
+            ("🤖", "Artificial Intelligence", "Advanced analysis with Gemini AI"),
+            ("📊", "Technical Indicators", "RSI, MACD, Moving Averages"),
+            ("🔔", "Smart Notifications", "Custom alerts for opportunities"),
+            ("📱", "Easy Interface", "Interactive buttons and simple menus")
+        ]
+        
+        for emoji, title, desc in features_list:
+            feature_frame = tk.Frame(features_frame, bg='#2b2b2b')
+            feature_frame.pack(fill=tk.X, padx=5, pady=3)
+            
+            # Emoji
+            emoji_label = tk.Label(
+                feature_frame,
+                text=emoji,
+                font=("Arial", 12),
+                fg='#ffffff',
+                bg='#2b2b2b',
+                width=3
+            )
+            emoji_label.pack(side=tk.LEFT)
+            
+            # Title
+            title_label = tk.Label(
+                feature_frame,
+                text=title,
+                font=("Arial", 10, "bold"),
+                fg='#00ff00',
+                bg='#2b2b2b',
+                width=20,
+                anchor='w'
+            )
+            title_label.pack(side=tk.LEFT, padx=(5, 10))
+            
+            # Description
+            desc_label = tk.Label(
+                feature_frame,
+                text=desc,
+                font=("Arial", 9),
+                fg='#cccccc',
+                bg='#2b2b2b',
+                anchor='w'
+            )
+            desc_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Bot Status Section
+        status_frame = tk.LabelFrame(
+            content_frame,
+            text="📊 Bot Status",
+            font=("Arial", 12, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        status_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        # Bot status info
+        status_info_frame = tk.Frame(status_frame, bg='#2b2b2b')
+        status_info_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Version
+        version_label = tk.Label(
+            status_info_frame,
+            text="🔖 Version: v1.2.0 Enhanced",
+            font=("Arial", 10),
+            fg='#cccccc',
+            bg='#2b2b2b'
+        )
+        version_label.pack(anchor=tk.W, pady=2)
+        
+        # Status
+        self.bot_status_label = tk.Label(
+            status_info_frame,
+            text="🔴 Bot: Stopped",
+            font=("Arial", 10),
+            fg='#ff6666',
+            bg='#2b2b2b'
+        )
+        self.bot_status_label.pack(anchor=tk.W, pady=2)
+        
+        # Users count in general tab
+        self.general_users_count_label = tk.Label(
+            status_info_frame,
+            text="👥 Users: Loading...",
+            font=("Arial", 10),
+            fg='#cccccc',
+            bg='#2b2b2b'
+        )
+        self.general_users_count_label.pack(anchor=tk.W, pady=2)
+        
+        # Update status periodically
+        self.update_general_tab_status()
+    
+    def execute_bot_command(self, command):
+        """Execute bot command (placeholder for now - would need actual bot connection)"""
+        try:
+            # Show execution dialog
+            command_window = tk.Toplevel(self.root)
+            command_window.title(f"Execute {command}")
+            command_window.geometry("500x300")
+            command_window.configure(bg='#2b2b2b')
+            command_window.transient(self.root)
+            command_window.grab_set()
+            
+            # Title
+            title_label = tk.Label(
+                command_window,
+                text=f"🚀 Execute Command: {command}",
+                font=("Arial", 14, "bold"),
+                fg='#ffffff',
+                bg='#2b2b2b'
+            )
+            title_label.pack(pady=20)
+            
+            # Info text
+            info_text = scrolledtext.ScrolledText(
+                command_window,
+                height=10,
+                width=60,
+                bg='#1a1a1a',
+                fg='#00ff00',
+                font=("Consolas", 10)
+            )
+            info_text.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+            
+            # Add command info
+            info_text.insert(tk.END, f"Command: {command}\n")
+            info_text.insert(tk.END, f"Status: Ready to execute\n")
+            info_text.insert(tk.END, f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            info_text.insert(tk.END, "Note: This is a placeholder implementation.\n")
+            info_text.insert(tk.END, "In a full implementation, this would send the command\n")
+            info_text.insert(tk.END, "to the running bot instance via IPC or API.\n")
+            
+            # Close button
+            close_button = tk.Button(
+                command_window,
+                text="❌ Close",
+                font=("Arial", 10),
+                bg='#666666',
+                fg='white',
+                command=command_window.destroy
+            )
+            close_button.pack(pady=10)
+            
+            self.add_log(f"🚀 Command executed: {command}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to execute command: {str(e)}")
+    
+    def update_general_tab_status(self):
+        """Update general tab status information"""
+        try:
+            # Update bot status
+            if hasattr(self, 'embedded_bot') and self.embedded_bot.is_running:
+                self.bot_status_label.config(text="🟢 Bot: Running", fg='#00ff00')
+            else:
+                self.bot_status_label.config(text="🔴 Bot: Stopped", fg='#ff6666')
+            
+            # Update users count
+            if hasattr(self, 'embedded_bot'):
+                users_count = self.embedded_bot.get_users_count()
+                if isinstance(users_count, int):
+                    self.general_users_count_label.config(text=f"👥 Users: {users_count}")
+                else:
+                    self.general_users_count_label.config(text=f"👥 Users: {users_count}")
+            
+            # Schedule next update
+            if hasattr(self, 'root'):
+                self.root.after(5000, self.update_general_tab_status)
+                
+        except Exception as e:
+            # Silent error handling
+            if hasattr(self, 'root'):
+                self.root.after(10000, self.update_general_tab_status)
     
     def create_configurations_tab(self, notebook):
         """Create configurations tab"""
@@ -1496,6 +2171,17 @@ class TradingBotUI:
             command=lambda: self.unban_selected_user(users_tree_tab)
         )
         unban_tab_button.pack(side=tk.LEFT, padx=5)
+        
+        # Delete user from memory button
+        delete_memory_tab_button = tk.Button(
+            tab_action_frame,
+            text="🗑️ حذف من الذاكرة",
+            font=("Arial", 10, "bold"),
+            bg='#FF5722',
+            fg='white',
+            command=lambda: self.delete_selected_user_from_memory(users_tree_tab)
+        )
+        delete_memory_tab_button.pack(side=tk.LEFT, padx=5)
         
         refresh_tab_button = tk.Button(
             tab_action_frame,
@@ -2217,7 +2903,7 @@ class TradingBotUI:
                 seconds = total_seconds % 60
                 
                 uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                self.uptime_label.config(text=f"⏱️ وقت تشغيل الواجهة: {uptime_str}")
+                self.uptime_label.config(text=f"⏱️ Interface Uptime: {uptime_str}")
                 
                 # Schedule next update
                 self.root.after(1000, self.update_uptime)
@@ -2244,12 +2930,12 @@ class TradingBotUI:
                     
                     bot_uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
                     self.bot_uptime_label.config(
-                        text=f"🤖 وقت تشغيل البوت: {bot_uptime_str}",
+                        text=f"🤖 Bot Uptime: {bot_uptime_str}",
                         fg='#00ff00'
                     )
                 else:
                     self.bot_uptime_label.config(
-                        text="🤖 وقت تشغيل البوت: متوقف",
+                        text="🤖 Bot Uptime: Stopped",
                         fg='#ff6666'
                     )
                 
