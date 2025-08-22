@@ -9499,25 +9499,21 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
                 logger.error(f"[ERROR] فشل في إرسال الإشعار البسيط: {send_error}")
             return  # إنهاء الدالة مبكراً في حالة الخطأ
         
-        # نظام موحد: بناء الرسالة الطويلة أولاً ثم اختيار النسخة المناسبة
+        # نظام موحد: بناء الرسالة الطويلة أولاً ثم اختيار النسخة حسب الإعداد
         global SHORT_NOTIFICATIONS
         
         # بناء الرسالة الطويلة أولاً (لا تغيير في النظام الأصلي)
         long_message = format_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
         
-        # فحص طول الرسالة لاختيار النسخة المناسبة
-        max_telegram_length = 4096
-        message_too_long = len(long_message) > max_telegram_length
-        
-        # اختيار نوع الرسالة بناءً على الإعداد وطول الرسالة
-        if SHORT_NOTIFICATIONS or message_too_long:
+        # اختيار نوع الرسالة بناءً على إعداد SHORT_NOTIFICATIONS فقط
+        if SHORT_NOTIFICATIONS:
             # استخراج النسخة المختصرة من نفس البيانات المحسوبة في الرسالة الطويلة
             message = extract_short_message_from_long(long_message, symbol, symbol_info, price_data, fresh_analysis, user_id)
-            if message_too_long:
-                logger.info(f"[AUTO_SHORT] تم اختيار الرسالة المختصرة تلقائياً للرمز {symbol} بسبب طول الرسالة ({len(long_message)} حرف)")
+            logger.debug(f"[SHORT_MODE] تم اختيار الرسالة المختصرة للرمز {symbol} حسب إعداد المطور")
         else:
             # استخدام الرسالة الطويلة كما هي
             message = long_message
+            logger.debug(f"[LONG_MODE] تم اختيار الرسالة الطويلة للرمز {symbol} حسب إعداد المطور")
         
         # إنشاء أزرار التقييم
         markup = create_feedback_buttons(trade_id) if trade_id else None
