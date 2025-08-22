@@ -230,10 +230,15 @@ class EmbeddedTradingBot:
         """Get total number of users from JSON files"""
         try:
             user_files = glob.glob(os.path.join(USERS_DIR, "user_*.json"))
-            return len(user_files)
+            count = len(user_files)
+            if count == 0:
+                # Check if any users have been saved by the bot
+                # If no users directory or files exist, return a message
+                return "No users data"
+            return count
         except Exception as e:
             self.logger.error(f"Error getting users count: {e}")
-            return 0
+            return "Error"
     
     def get_users_details(self):
         """Get detailed information about all users"""
@@ -475,6 +480,7 @@ class EmbeddedTradingBot:
 
 class TradingBotUI:
     def __init__(self):
+        print("Initializing TradingBotUI...")
         self.embedded_bot = EmbeddedTradingBot(EMBEDDED_CONFIG)
         self.PASSWORD = "041768454"
         self.is_logged_in = False
@@ -486,7 +492,9 @@ class TradingBotUI:
         self.bot_output_thread = None
         
         # Initialize main window
+        print("Setting up main window...")
         self.setup_main_window()
+        print("Main window setup complete.")
         self.create_login_interface()
         self.create_control_interface()
         
@@ -499,20 +507,56 @@ class TradingBotUI:
     def setup_main_window(self):
         """Setup main application window"""
         self.root = tk.Tk()
-        self.root.title("🤖 بوت التداول المتقدم v1.2.0 - واجهة التحكم")
+        self.root.title("🤖 Advanced Trading Bot v1.2.0 - Control Interface")
         self.root.geometry("850x750")
-        self.root.resizable(False, False)
+        self.root.resizable(False, False)  # Prevent resizing but allow moving
         
-        # Set embedded icon
+        # Set icon
         try:
-            icon_data = base64.b64decode(EMBEDDED_ICON)
-            icon_image = tk.PhotoImage(data=icon_data)
-            self.root.iconphoto(False, icon_image)
-        except:
+            # Try to use icon.ico file first
+            if os.path.exists('icon.ico'):
+                self.root.iconbitmap('icon.ico')
+                # Also create small icon for interface use
+                self.create_interface_icon()
+            else:
+                # Fallback to embedded icon
+                icon_data = base64.b64decode(EMBEDDED_ICON)
+                icon_image = tk.PhotoImage(data=icon_data)
+                self.root.iconphoto(False, icon_image)
+                self.small_icon = None
+        except Exception as e:
+            print(f"Failed to set icon: {e}")
+            self.small_icon = None
             pass
         
         # Configure main style
         self.root.configure(bg='#2b2b2b')
+    
+    def create_interface_icon(self):
+        """Create small icon for interface use"""
+        try:
+            from PIL import Image, ImageTk
+            # Check if icon file exists
+            if not os.path.exists('icon.ico'):
+                print("icon.ico not found")
+                self.small_icon = None
+                self.medium_icon = None
+                return
+            
+            # Load and resize icon
+            icon_image = Image.open('icon.ico')
+            # Create different sizes for different uses (increased sizes)
+            self.small_icon = ImageTk.PhotoImage(icon_image.resize((32, 32), Image.Resampling.LANCZOS))
+            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((64, 64), Image.Resampling.LANCZOS))
+            print("Interface icons created successfully")
+        except ImportError as e:
+            print(f"PIL not available, using fallback: {e}")
+            self.small_icon = None
+            self.medium_icon = None
+        except Exception as e:
+            print(f"Failed to create interface icons: {e}")
+            self.small_icon = None
+            self.medium_icon = None
         
         # Create main frame
         self.main_frame = tk.Frame(self.root, bg='#2b2b2b')
@@ -522,10 +566,18 @@ class TradingBotUI:
         """Create login interface"""
         self.login_frame = tk.Frame(self.main_frame, bg='#2b2b2b')
         
-        # Title
+        # Bot icon and title
+        if hasattr(self, 'medium_icon') and self.medium_icon:
+            icon_label = tk.Label(
+                self.login_frame,
+                image=self.medium_icon,
+                bg='#2b2b2b'
+            )
+            icon_label.pack(pady=(20, 10))
+        
         title_label = tk.Label(
             self.login_frame,
-            text="🤖 بوت التداول المتقدم",
+            text="Advanced Trading Bot",
             font=("Arial", 24, "bold"),
             fg='#00ff00',
             bg='#2b2b2b'
@@ -535,7 +587,7 @@ class TradingBotUI:
         # Subtitle
         subtitle_label = tk.Label(
             self.login_frame,
-            text="واجهة التحكم المتقدمة v1.2.0 - نظام مدمج كامل",
+            text="Advanced Control Interface v1.2.0 - Complete Integrated System",
             font=("Arial", 12),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -549,7 +601,7 @@ class TradingBotUI:
         # Password label
         password_label = tk.Label(
             password_frame,
-            text="🔐 أدخل كلمة المرور:",
+            text="🔐 Enter Password:",
             font=("Arial", 14),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -570,7 +622,7 @@ class TradingBotUI:
         # Login button
         self.login_button = tk.Button(
             password_frame,
-            text="🚀 دخول",
+            text="🚀 Login",
             font=("Arial", 12, "bold"),
             bg='#00aa00',
             fg='white',
@@ -611,10 +663,21 @@ class TradingBotUI:
         )
         settings_button.pack(side=tk.LEFT, padx=5)
         
-        # Title
+        # Icon and Title
+        title_container = tk.Frame(header_frame, bg='#2b2b2b')
+        title_container.pack(expand=True)
+        
+        if hasattr(self, 'small_icon') and self.small_icon:
+            icon_label = tk.Label(
+                title_container,
+                image=self.small_icon,
+                bg='#2b2b2b'
+            )
+            icon_label.pack(side=tk.LEFT, padx=(0, 10))
+        
         header_label = tk.Label(
-            header_frame,
-            text="🤖 لوحة التحكم في بوت التداول - نظام مدمج كامل",
+            title_container,
+            text="Trading Bot Control Panel - Complete Integrated System",
             font=("Arial", 18, "bold"),
             fg='#00ff00',
             bg='#2b2b2b'
@@ -637,7 +700,7 @@ class TradingBotUI:
         # Users count button (with click functionality)
         self.users_count_button = tk.Button(
             header_frame,
-            text="👥 عدد المستخدمين: 0",
+            text="👥 Users Count: 0",
             font=("Arial", 10, "bold"),
             bg='#800020',
             fg='#ff0000',
@@ -658,12 +721,12 @@ class TradingBotUI:
         
         # Control buttons frame
         control_buttons_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
-        control_buttons_frame.pack(pady=20)
+        control_buttons_frame.pack(pady=10)
         
         # Start Bot button
         self.start_button = tk.Button(
             control_buttons_frame,
-            text="🚀 تشغيل البوت",
+            text="🚀 Start Bot",
             font=("Arial", 14, "bold"),
             bg='#00aa00',
             fg='white',
@@ -676,7 +739,7 @@ class TradingBotUI:
         # Stop Bot button
         self.stop_button = tk.Button(
             control_buttons_frame,
-            text="🛑 إيقاف البوت",
+            text="🛑 Stop Bot",
             font=("Arial", 14, "bold"),
             bg='#aa0000',
             fg='white',
@@ -689,12 +752,12 @@ class TradingBotUI:
         
         # Status frame
         status_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
-        status_frame.pack(fill=tk.X, pady=20)
+        status_frame.pack(fill=tk.X, pady=10)
         
         # Status label
         status_label = tk.Label(
             status_frame,
-            text="📊 حالة البوت:",
+            text="📊 Bot Status:",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -704,7 +767,7 @@ class TradingBotUI:
         # Status indicator
         self.status_indicator = tk.Label(
             status_frame,
-            text="⚫ متوقف",
+            text="⚫ Stopped",
             font=("Arial", 12),
             fg='#ff6666',
             bg='#2b2b2b'
@@ -713,12 +776,23 @@ class TradingBotUI:
         
         # Log frame
         log_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=20)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        # Log label
+        # Log label with icon
+        log_header_frame = tk.Frame(log_frame, bg='#2b2b2b')
+        log_header_frame.pack(anchor=tk.W)
+        
+        if hasattr(self, 'small_icon') and self.small_icon:
+            log_icon_label = tk.Label(
+                log_header_frame,
+                image=self.small_icon,
+                bg='#2b2b2b'
+            )
+            log_icon_label.pack(side=tk.LEFT, padx=(0, 5))
+        
         log_label = tk.Label(
-            log_frame,
-            text="📝 سجل الأحداث:",
+            log_header_frame,
+            text="Event Log:",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -814,6 +888,7 @@ class TradingBotUI:
         users_window.geometry("1000x600")
         users_window.configure(bg='#2b2b2b')
         users_window.transient(self.root)
+        users_window.resizable(False, False)  # Prevent resizing but allow moving
         users_window.grab_set()
         
         # Main frame
@@ -1092,15 +1167,19 @@ class TradingBotUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
+        # Create centered container for all sections
+        centered_container = tk.Frame(scrollable_frame, bg='#2b2b2b')
+        centered_container.pack(expand=True)
+        
         # Telegram API Section
         telegram_frame = tk.LabelFrame(
-            scrollable_frame,
+            centered_container,
             text="📱 إدارة رمز Telegram Bot API",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
         )
-        telegram_frame.pack(fill=tk.X, padx=10, pady=10)
+        telegram_frame.pack(pady=10, padx=20)
         
         # Current token display
         token_label = tk.Label(
@@ -1150,13 +1229,13 @@ class TradingBotUI:
         
         # Gemini API Section
         gemini_frame = tk.LabelFrame(
-            scrollable_frame,
+            centered_container,
             text="🤖 إدارة مفاتيح Gemini API",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
         )
-        gemini_frame.pack(fill=tk.X, padx=10, pady=10)
+        gemini_frame.pack(pady=10, padx=20)
         
         # API Keys listbox
         keys_label = tk.Label(
@@ -1250,13 +1329,13 @@ class TradingBotUI:
         
         # MT5 Login Section
         mt5_frame = tk.LabelFrame(
-            scrollable_frame,
+            centered_container,
             text="🏦 إعدادات تسجيل الدخول MT5",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
         )
-        mt5_frame.pack(fill=tk.X, padx=10, pady=10)
+        mt5_frame.pack(pady=10, padx=20)
         
         # MT5 Account field
         account_label = tk.Label(
@@ -1841,6 +1920,7 @@ class TradingBotUI:
             status_window.geometry("600x500")
             status_window.configure(bg='#2b2b2b')
             status_window.transient(self.settings_window)
+            status_window.resizable(False, False)  # Prevent resizing but allow moving
             status_window.grab_set()
             
             # Status text area
@@ -1955,6 +2035,7 @@ class TradingBotUI:
             progress_window.geometry("400x150")
             progress_window.configure(bg='#2b2b2b')
             progress_window.transient(self.settings_window)
+            progress_window.resizable(False, False)  # Prevent resizing but allow moving
             progress_window.grab_set()
             
             progress_label = tk.Label(
@@ -2034,6 +2115,7 @@ class TradingBotUI:
             progress_window.geometry("400x150")
             progress_window.configure(bg='#2b2b2b')
             progress_window.transient(self.settings_window)
+            progress_window.resizable(False, False)  # Prevent resizing but allow moving
             progress_window.grab_set()
             
             progress_label = tk.Label(
@@ -2311,14 +2393,22 @@ class TradingBotUI:
             main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
             
             # App icon/title
-            title_label = tk.Label(
-                main_frame,
-                text="🤖",
-                font=("Arial", 48),
-                fg='#00ff00',
-                bg='#2b2b2b'
-            )
-            title_label.pack(pady=10)
+            if hasattr(self, 'medium_icon') and self.medium_icon:
+                icon_label = tk.Label(
+                    main_frame,
+                    image=self.medium_icon,
+                    bg='#2b2b2b'
+                )
+                icon_label.pack(pady=10)
+            else:
+                title_label = tk.Label(
+                    main_frame,
+                    text="🤖",
+                    font=("Arial", 48),
+                    fg='#00ff00',
+                    bg='#2b2b2b'
+                )
+                title_label.pack(pady=10)
             
             # App name
             app_name_label = tk.Label(
@@ -2541,11 +2631,11 @@ class TradingBotUI:
         
         if entered_password == self.PASSWORD:
             self.is_logged_in = True
-            self.login_status_label.config(text="✅ تم تسجيل الدخول بنجاح!", fg='#00ff00')
+            self.login_status_label.config(text="✅ Login successful!", fg='#00ff00')
             self.add_log("🔐 تم تسجيل دخول المستخدم بنجاح")
             self.root.after(1000, self.show_control)
         else:
-            self.login_status_label.config(text="❌ كلمة مرور خاطئة!", fg='#ff6666')
+            self.login_status_label.config(text="❌ Wrong password!", fg='#ff6666')
             self.password_entry.delete(0, tk.END)
             self.password_entry.focus()
     
@@ -2564,7 +2654,18 @@ class TradingBotUI:
     def start_bot(self):
         """Start the external bot file tbot_v1.2.0.py"""
         if not self.is_logged_in:
-            messagebox.showerror("رفض الوصول", "يرجى تسجيل الدخول أولاً!")
+            messagebox.showerror("Access Denied", "Please login first!")
+            return
+        
+        # Ask for password before starting bot
+        password = simpledialog.askstring(
+            "Password Required",
+            "Enter password to start the bot:",
+            show='*'
+        )
+        
+        if password != self.PASSWORD:
+            messagebox.showerror("Error", "Incorrect password!")
             return
         
         # Check if bot file exists
@@ -2582,14 +2683,20 @@ class TradingBotUI:
         try:
             self.add_log("🚀 جاري تشغيل بوت التداول الخارجي...")
             
-            # Start external bot process
+            # Start external bot process (prevent CMD window from showing)
+            import subprocess
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NO_WINDOW
+            
             self.bot_process = subprocess.Popen(
                 [sys.executable, bot_file],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 bufsize=1,
-                cwd=os.getcwd()
+                cwd=os.getcwd(),
+                creationflags=creationflags
             )
             
             # Start thread to read bot output
@@ -2612,7 +2719,18 @@ class TradingBotUI:
     def stop_bot(self):
         """Stop the external bot process"""
         if not self.is_logged_in:
-            messagebox.showerror("رفض الوصول", "يرجى تسجيل الدخول أولاً!")
+            messagebox.showerror("Access Denied", "Please login first!")
+            return
+        
+        # Ask for password before stopping bot
+        password = simpledialog.askstring(
+            "Password Required",
+            "Enter password to stop the bot:",
+            show='*'
+        )
+        
+        if password != self.PASSWORD:
+            messagebox.showerror("Error", "Incorrect password!")
             return
         
         try:
@@ -2711,7 +2829,7 @@ class TradingBotUI:
                 if hasattr(self, 'users_count_button'):
                     users_count = self.embedded_bot.get_users_count()
                     self.root.after(0, lambda: self.users_count_button.config(
-                        text=f"👥 عدد المستخدمين: {users_count}"
+                        text=f"👥 Users Count: {users_count}"
                     ))
                 
                 time.sleep(5)  # Check every 5 seconds
@@ -2725,10 +2843,31 @@ class TradingBotUI:
         bot_running = hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None
         
         if bot_running:
-            if messagebox.askokcancel("إنهاء", "البوت لا يزال يعمل. إيقاف البوت والخروج؟"):
-                self.stop_bot()
-                self.is_monitoring = False
-                self.root.destroy()
+            # Ask for password before allowing to close when bot is running
+            password = simpledialog.askstring(
+                "Password Required",
+                "Bot is running. Enter password to stop bot and exit:",
+                show='*'
+            )
+            
+            if password == self.PASSWORD:
+                if messagebox.askokcancel("Exit", "Stop the bot and exit?"):
+                    try:
+                        # Stop the bot process
+                        if hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None:
+                            self.bot_process.terminate()
+                            try:
+                                self.bot_process.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                self.bot_process.kill()
+                        
+                        self.is_monitoring = False
+                        self.root.destroy()
+                    except Exception as e:
+                        messagebox.showerror("Error", f"Error stopping bot: {e}")
+            else:
+                if password is not None:  # User didn't cancel
+                    messagebox.showerror("Error", "Incorrect password! Cannot exit while bot is running.")
         else:
             self.is_monitoring = False
             self.root.destroy()
@@ -2740,15 +2879,24 @@ class TradingBotUI:
 
 if __name__ == "__main__":
     try:
+        print("Starting Trading Bot UI...")
         app = TradingBotUI()
+        print("UI initialized successfully, starting main loop...")
         app.run()
     except KeyboardInterrupt:
         print("\n🛑 تم إنهاء التطبيق بواسطة المستخدم")
     except Exception as e:
-        temp_root = tk.Tk()
-        temp_root.withdraw()
-        messagebox.showerror(
-            "خطأ في التطبيق", 
-            f"❌ حدث خطأ في التطبيق:\n\n{str(e)}\n\nيرجى التحقق من تفاصيل الخطأ والمحاولة مرة أخرى."
-        )
-        temp_root.destroy()
+        print(f"Error starting application: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            temp_root = tk.Tk()
+            temp_root.withdraw()
+            messagebox.showerror(
+                "خطأ في التطبيق", 
+                f"❌ حدث خطأ في التطبيق:\n\n{str(e)}\n\nيرجى التحقق من تفاصيل الخطأ والمحاولة مرة أخرى."
+            )
+            temp_root.destroy()
+        except:
+            # If even the error dialog fails, just print the error
+            print(f"Critical error: {e}")

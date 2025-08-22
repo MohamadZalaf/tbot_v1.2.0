@@ -2,84 +2,84 @@
 chcp 65001 >nul
 echo.
 echo ========================================
-echo 🤖 بناء بوت التداول v1.2.0
+echo Building Trading Bot v1.2.0
 echo ========================================
 echo.
 
-REM التحقق من وجود الملفات المطلوبة
-echo 📋 فحص الملفات المطلوبة...
+REM Check for required files
+echo Checking required files...
 
 if not exist "bot_ui.py" (
-    echo ❌ bot_ui.py - غير موجود
+    echo [ERROR] bot_ui.py - not found
     pause
     exit /b 1
 ) else (
-    echo ✅ bot_ui.py - موجود
+    echo [OK] bot_ui.py - found
 )
 
 if not exist "tbot_v1.2.0.py" (
-    echo ❌ tbot_v1.2.0.py - غير موجود
+    echo [ERROR] tbot_v1.2.0.py - not found
     pause
     exit /b 1
 ) else (
-    echo ✅ tbot_v1.2.0.py - موجود
+    echo [OK] tbot_v1.2.0.py - found
 )
 
 if not exist "config.py" (
-    echo ❌ config.py - غير موجود
+    echo [ERROR] config.py - not found
     pause
     exit /b 1
 ) else (
-    echo ✅ config.py - موجود
+    echo [OK] config.py - found
 )
 
-REM إنشاء الأيقونة إذا لم تكن موجودة
+REM Create icon if not exists
 if not exist "icon.ico" (
-    echo 🎨 إنشاء ملف الأيقونة...
+    echo Creating icon file...
     python3 create_simple_icon.py
     if not exist "icon.ico" (
-        echo ⚠️ فشل في إنشاء الأيقونة - سيتم البناء بدونها
+        echo [WARNING] Failed to create icon - building without it
     )
 ) else (
-    echo ✅ icon.ico - موجود
+    echo [OK] icon.ico - found
 )
 
 echo.
-echo 🔧 بدء عملية البناء...
+echo Starting build process...
 echo.
 
-REM تنظيف الملفات القديمة
+REM Clean old files
 if exist "dist\TradingBot_1.2.0.exe" (
-    echo 🗑️ حذف الملف التنفيذي القديم...
+    echo Deleting old executable...
     del "dist\TradingBot_1.2.0.exe"
 )
 
 if exist "build" (
-    echo 🗑️ حذف مجلد البناء القديم...
+    echo Deleting old build folder...
     rmdir /s /q "build"
 )
 
-REM بناء التطبيق
-echo 🚀 تشغيل PyInstaller...
+REM Build application
+echo Running PyInstaller...
 pyinstaller build_TradingBot_1.2.0.spec
 
 if exist "dist\TradingBot_1.2.0.exe" (
     echo.
-    echo ✅ تم بناء TradingBot_1.2.0.exe بنجاح!
-    echo 📁 الملف موجود في: dist\TradingBot_1.2.0.exe
+    echo [SUCCESS] TradingBot_1.2.0.exe built successfully!
+    echo [INFO] File location: dist\TradingBot_1.2.0.exe
     echo.
-    echo 📊 معلومات الملف:
+    echo File information:
     dir "dist\TradingBot_1.2.0.exe"
     echo.
-    echo 🎉 البناء مكتمل بنجاح!
+    echo [SUCCESS] Build completed successfully!
 ) else (
     echo.
-    echo ❌ فشل في بناء الملف التنفيذي
-    echo 📋 يرجى مراجعة رسائل الخطأ أعلاه
+    echo [ERROR] Failed to build executable
+    echo [INFO] Please review error messages above
 )
 
 echo.
-echo تنظيف الملفات المؤقتة...
+echo Cleaning temporary files...
 if exist "create_simple_icon.py" del "create_simple_icon.py"
 if exist "create_icon.py" del "create_icon.py"
 
