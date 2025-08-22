@@ -1084,6 +1084,90 @@ def calculate_points_accurately(price_diff, symbol, capital=None, current_price=
         logger.error(f"خطأ في حساب النقاط للرمز {symbol}: {e}")
         return 0
 
+def extract_short_message_from_long(long_message: str, symbol: str, symbol_info: Dict, price_data: Dict, analysis: Dict, user_id: int) -> str:
+    """استخراج رسالة مختصرة من الرسالة الطويلة مع نفس القيم تماماً"""
+    try:
+        # استخراج القيم من الرسالة الطويلة باستخدام regex
+        import re
+        
+        # استخراج نوع الصفقة
+        trade_type_match = re.search(r'🟢 نوع الصفقة: (.+?) \(', long_message) or re.search(r'🔴 نوع الصفقة: (.+?) \(', long_message) or re.search(r'🟡 نوع الصفقة: (.+?) \(', long_message)
+        trade_type = trade_type_match.group(1) if trade_type_match else "غير محدد"
+        
+        # استخراج سعر الدخول
+        entry_price_match = re.search(r'📍 سعر الدخول المقترح: ([\d,\.]+)', long_message)
+        entry_price = entry_price_match.group(1) if entry_price_match else "0.00000"
+        
+        # استخراج الهدف الأول
+        target1_match = re.search(r'🎯 الهدف الأول: \((\d+) نقطة\)', long_message)
+        target1_points = target1_match.group(1) if target1_match else "0"
+        
+        # استخراج وقف الخسارة
+        stop_loss_match = re.search(r'🛑 وقف الخسارة: \((\d+) نقطة\)', long_message)
+        stop_loss_points = stop_loss_match.group(1) if stop_loss_match else "0"
+        
+        # استخراج نسبة النجاح
+        success_rate_match = re.search(r'✅ نسبة نجاح الصفقة: (\d+)%', long_message)
+        success_rate = success_rate_match.group(1) if success_rate_match else "0"
+        
+        # الفريم ثابت M15
+        timeframe = "M15"
+        
+        # جلب تفسير AI مختصر للفريم M15
+        ai_explanation = ""
+        try:
+            # استخدام Gemini AI لتفسير مختصر جداً
+            technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
+            indicators = technical_data.get('indicators', {}) if technical_data else {}
+            
+            if indicators and gemini_analyzer.model:
+                rsi = indicators.get('rsi', 50)
+                macd = indicators.get('macd', {})
+                
+                # طلب تفسير مختصر جداً من AI
+                prompt = f"""للرمز {symbol} في الفريم 15 دقيقة:
+RSI: {rsi:.1f}, MACD: {macd.get('macd', 0):.4f}
+اكتب سطر واحد مختصر جداً (أقل من 50 كلمة) يفسر سبب نسبة النجاح {success_rate}% للصفقة {trade_type}."""
+                
+                response = gemini_analyzer.model.generate_content(prompt)
+                if response and response.text:
+                    ai_explanation = response.text.strip()
+                    # تحديد طول التفسير لسطر واحد فقط
+                    if '\n' in ai_explanation:
+                        ai_explanation = ai_explanation.split('\n')[0]
+                    # قطع التفسير إذا كان طويلاً جداً
+                    if len(ai_explanation) > 100:
+                        ai_explanation = ai_explanation[:97] + "..."
+        except Exception as e:
+            logger.warning(f"[AI_SHORT_EXPLANATION] فشل في توليد تفسير مختصر للرمز {symbol}: {e}")
+            # تفسير افتراضي قصير جداً بناءً على البيانات الفعلية
+            try:
+                technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
+                indicators = technical_data.get('indicators', {}) if technical_data else {}
+                rsi = indicators.get('rsi', 50)
+                ai_explanation = f"RSI {rsi:.0f} يدعم {trade_type} بنسبة {success_rate}%"
+            except:
+                ai_explanation = f"تحليل فني يدعم {trade_type} بنسبة {success_rate}%"
+        
+        # تنسيق الرسالة المختصرة حسب التصميم المطلوب
+        message = f"""📊 **صفقة مقترحة**
+
+**الزوج:** {symbol}
+**نوع الصفقة:** {trade_type}
+**سعر الدخول:** {entry_price}
+**الهدف:** ({target1_points} نقطة)
+**وقف الخسارة:** (-{stop_loss_points} نقطة)
+
+⏰ **الفريم:** {timeframe}
+📈 **نسبة النجاح المتوقعة:** {success_rate}%
+💡 **السبب:** {ai_explanation}"""
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في استخراج الرسالة المختصرة: {e}")
+        return f"📊 **صفقة مقترحة**\n\n**الزوج:** {symbol}\nحدث خطأ في التنسيق"
+
 # دالة تنسيق رسائل الإشعارات المختصرة
 def format_very_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict, analysis: Dict, user_id: int) -> str:
     """تنسيق رسائل الإشعارات القصيرة جداً - نفس القيم من الرسالة الطويلة تماماً"""
@@ -9415,14 +9499,25 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
                 logger.error(f"[ERROR] فشل في إرسال الإشعار البسيط: {send_error}")
             return  # إنهاء الدالة مبكراً في حالة الخطأ
         
-        # استخدام النوع المناسب من الإشعارات حسب الإعداد العام
+        # نظام موحد: بناء الرسالة الطويلة أولاً ثم اختيار النسخة المناسبة
         global SHORT_NOTIFICATIONS
-        if SHORT_NOTIFICATIONS:
-            # استخدام الإشعارات القصيرة جداً
-            message = format_very_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
+        
+        # بناء الرسالة الطويلة أولاً (لا تغيير في النظام الأصلي)
+        long_message = format_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
+        
+        # فحص طول الرسالة لاختيار النسخة المناسبة
+        max_telegram_length = 4096
+        message_too_long = len(long_message) > max_telegram_length
+        
+        # اختيار نوع الرسالة بناءً على الإعداد وطول الرسالة
+        if SHORT_NOTIFICATIONS or message_too_long:
+            # استخراج النسخة المختصرة من نفس البيانات المحسوبة في الرسالة الطويلة
+            message = extract_short_message_from_long(long_message, symbol, symbol_info, price_data, fresh_analysis, user_id)
+            if message_too_long:
+                logger.info(f"[AUTO_SHORT] تم اختيار الرسالة المختصرة تلقائياً للرمز {symbol} بسبب طول الرسالة ({len(long_message)} حرف)")
         else:
-            # استخدام الإشعارات المختصرة العادية
-            message = format_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
+            # استخدام الرسالة الطويلة كما هي
+            message = long_message
         
         # إنشاء أزرار التقييم
         markup = create_feedback_buttons(trade_id) if trade_id else None
