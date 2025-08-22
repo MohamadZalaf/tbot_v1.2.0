@@ -4,7 +4,7 @@
 """
 🤖 Trading Bot UI Controller v1.2.0 - ENHANCED EMBEDDED VERSION
 ==============================================================
-Arabic GUI Interface for Advanced Trading Bot Control with Full Embedding
+English GUI Interface for Advanced Trading Bot Control with Full Embedding
 
 Features:
 - Complete bot code embedding (no external .py files needed)
@@ -18,6 +18,13 @@ Features:
 Developer: Mohamad Zalaf ©️2025
 Compatible with: Embedded tbot_v1.2.0.py + config.py
 """
+
+# Hide console window on Windows
+import sys
+import os
+if os.name == 'nt':  # Windows
+    import ctypes
+    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk, simpledialog
@@ -64,7 +71,7 @@ def load_external_config():
                 'DEFAULT_CAPITAL_OPTIONS': getattr(config, 'DEFAULT_CAPITAL_OPTIONS', [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000])
             }
     except Exception as e:
-        print(f"⚠️ خطأ في تحميل config.py: {e}")
+        print(f"⚠️ Error loading config.py: {e}")
         
     # Fallback to embedded config
     return {
@@ -112,28 +119,78 @@ def get_all_user_data_sources():
     try:
         users_data = []
         
+        # Try to read from running bot's log file first (real-time data)
+        try:
+            if os.path.exists('advanced_trading_bot_v1.2.0.log'):
+                with open('advanced_trading_bot_v1.2.0.log', 'r', encoding='utf-8') as f:
+                    log_lines = f.readlines()
+                    
+                # Extract user data from recent log entries
+                for line in reversed(log_lines[-1000:]):  # Check last 1000 lines
+                    if 'User data saved for' in line or 'authenticated successfully' in line:
+                        try:
+                            # Extract user ID from log
+                            import re
+                            user_match = re.search(r'(?:User data saved for|authenticated successfully for user) (\d+)', line)
+                            if user_match:
+                                user_id = user_match.group(1)
+                                # Check if we already have this user
+                                if not any(u['user_id'] == user_id for u in users_data):
+                                    user_info = {
+                                        'user_id': user_id,
+                                        'username': 'Active User',
+                                        'first_name': f'User {user_id}',
+                                        'last_name': '',
+                                        'registration_date': line.split(' - ')[0] if ' - ' in line else 'Unknown',
+                                        'last_activity': line.split(' - ')[0] if ' - ' in line else 'Unknown',
+                                        'trading_mode': 'Unknown',
+                                        'is_banned': False,
+                                        'source': 'bot_log'
+                                    }
+                                    users_data.append(user_info)
+                        except Exception:
+                            continue
+        except Exception as e:
+            print(f"Could not read bot log: {e}")
+        
         # 1. Read from user feedback files (trading_data/user_feedback_*.json)
         feedback_files = glob.glob("trading_data/user_feedback_*.json")
         for feedback_file in feedback_files:
             try:
                 user_id = feedback_file.split('user_feedback_')[1].split('.json')[0]
                 if user_id.isdigit():
-                    with open(feedback_file, 'r', encoding='utf-8') as f:
-                        feedback_data = json.load(f)
-                    
-                    # Extract user info from feedback data
-                    user_info = {
-                        'user_id': user_id,
-                        'username': feedback_data.get('username', 'غير محدد'),
-                        'first_name': feedback_data.get('first_name', 'غير محدد'),
-                        'last_name': feedback_data.get('last_name', ''),
-                        'registration_date': feedback_data.get('join_date', 'غير محدد'),
-                        'last_activity': feedback_data.get('last_active', 'غير محدد'),
-                        'trading_mode': feedback_data.get('trading_mode', 'غير محدد'),
-                        'is_banned': False,  # Will be checked later
-                        'source': 'feedback'
-                    }
-                    users_data.append(user_info)
+                    # Check if we already have this user from logs
+                    existing_user = next((u for u in users_data if u['user_id'] == user_id), None)
+                    if existing_user:
+                        # Update existing user with more detailed data
+                        with open(feedback_file, 'r', encoding='utf-8') as f:
+                            feedback_data = json.load(f)
+                        existing_user.update({
+                            'username': feedback_data.get('username', existing_user['username']),
+                            'first_name': feedback_data.get('first_name', existing_user['first_name']),
+                            'last_name': feedback_data.get('last_name', ''),
+                            'registration_date': feedback_data.get('join_date', existing_user['registration_date']),
+                            'last_activity': feedback_data.get('last_active', existing_user['last_activity']),
+                            'trading_mode': feedback_data.get('trading_mode', existing_user['trading_mode']),
+                            'source': 'feedback_enhanced'
+                        })
+                    else:
+                        # Add new user from feedback
+                        with open(feedback_file, 'r', encoding='utf-8') as f:
+                            feedback_data = json.load(f)
+                        
+                        user_info = {
+                            'user_id': user_id,
+                            'username': feedback_data.get('username', 'Unknown'),
+                            'first_name': feedback_data.get('first_name', 'Unknown'),
+                            'last_name': feedback_data.get('last_name', ''),
+                            'registration_date': feedback_data.get('join_date', 'Unknown'),
+                            'last_activity': feedback_data.get('last_active', 'Unknown'),
+                            'trading_mode': feedback_data.get('trading_mode', 'Unknown'),
+                            'is_banned': False,  # Will be checked later
+                            'source': 'feedback'
+                        }
+                        users_data.append(user_info)
             except Exception as e:
                 print(f"Error reading feedback file {feedback_file}: {e}")
                 continue
@@ -679,7 +736,7 @@ class TradingBotUI:
         """Setup main application window"""
         self.root = tk.Tk()
         self.root.title("🤖 Advanced Trading Bot v1.2.0 - Control Interface")
-        self.root.geometry("850x750")
+        self.root.geometry("850x850")
         self.root.resizable(False, False)  # Prevent resizing but allow moving
         
         # Set icon
@@ -716,9 +773,10 @@ class TradingBotUI:
             
             # Load and resize icon
             icon_image = Image.open('icon.ico')
-            # Create different sizes for different uses (increased sizes)
+            # Create different sizes for different uses (increased sizes for login screen)
             self.small_icon = ImageTk.PhotoImage(icon_image.resize((32, 32), Image.Resampling.LANCZOS))
-            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((64, 64), Image.Resampling.LANCZOS))
+            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((96, 96), Image.Resampling.LANCZOS))
+            self.large_icon = ImageTk.PhotoImage(icon_image.resize((128, 128), Image.Resampling.LANCZOS))
             print("Interface icons created successfully")
         except ImportError as e:
             print(f"PIL not available, using fallback: {e}")
@@ -745,6 +803,16 @@ class TradingBotUI:
                 bg='#2b2b2b'
             )
             icon_label.pack(pady=(20, 10))
+        else:
+            # Create a larger text-based icon if no image available
+            large_icon_label = tk.Label(
+                self.login_frame,
+                text="🤖",
+                font=("Arial", 80),
+                fg='#00ff00',
+                bg='#2b2b2b'
+            )
+            large_icon_label.pack(pady=(20, 10))
         
         title_label = tk.Label(
             self.login_frame,
@@ -882,9 +950,9 @@ class TradingBotUI:
         # Logout button
         logout_button = tk.Button(
             header_frame,
-            text="🚪 خروج",
+            text="🚪 Logout",
             font=("Arial", 10),
-            bg='#666666',
+            bg='#ff4444',
             fg='white',
             command=self.logout
         )
@@ -976,7 +1044,7 @@ class TradingBotUI:
         
         save_logs_button = tk.Button(
             log_controls_frame,
-            text="💾 حفظ السجل كملف TXT",
+            text="💾 Save Log as TXT",
             font=("Arial", 10, "bold"),
             bg='#FF9800',
             fg='white',
@@ -986,7 +1054,7 @@ class TradingBotUI:
         
         clear_logs_button = tk.Button(
             log_controls_frame,
-            text="🧹 مسح السجل",
+            text="🧹 Clear Log",
             font=("Arial", 10, "bold"),
             bg='#f44336',
             fg='white',
@@ -1012,7 +1080,7 @@ class TradingBotUI:
         # Uptime counters (bottom left)
         self.uptime_label = tk.Label(
             bottom_frame,
-            text="⏱️ وقت تشغيل الواجهة: 00:00:00",
+            text="⏱️ Interface Uptime: 00:00:00",
             font=("Arial", 10),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -1021,7 +1089,7 @@ class TradingBotUI:
         
         self.bot_uptime_label = tk.Label(
             bottom_frame,
-            text="🤖 وقت تشغيل البوت: متوقف",
+            text="🤖 Bot Uptime: Stopped",
             font=("Arial", 10),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -1035,10 +1103,10 @@ class TradingBotUI:
         self.update_bot_uptime()
         
         # Add initial log messages
-        self.add_log("🔧 تم تهيئة واجهة التحكم في البوت - إصدار مدمج كامل")
-        self.add_log("ℹ️  يستخدم نظام ملفات JSON الأصلي")
-        self.add_log("📁 المستخدمون محفوظون في: trading_data/users/")
-        self.add_log("🔐 يرجى تسجيل الدخول للوصول إلى عناصر التحكم")
+        self.add_log("🔧 Bot control interface initialized - Full embedded version")
+        self.add_log("ℹ️  Using original JSON file system")
+        self.add_log("📁 Users saved in: trading_data/users/")
+        self.add_log("🔐 Please log in to access controls")
     
     def show_users_management_window(self):
         """Show users management window with password protection"""
@@ -1436,10 +1504,14 @@ class TradingBotUI:
         centered_container = tk.Frame(scrollable_frame, bg='#2b2b2b')
         centered_container.pack(expand=True, pady=10)
         
+        # Add padding frame to center content
+        content_frame = tk.Frame(centered_container, bg='#2b2b2b')
+        content_frame.pack(expand=True, padx=50)
+        
         # Title
         title_label = tk.Label(
-            centered_container,
-            text="🔧 إعدادات عامة وأوامر البوت",
+            content_frame,
+            text="🔧 General Settings and Bot Commands",
             font=("Arial", 16, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -1448,8 +1520,8 @@ class TradingBotUI:
         
         # Bot Commands Section
         commands_frame = tk.LabelFrame(
-            centered_container,
-            text="🤖 أوامر البوت المتاحة",
+            content_frame,
+            text="🤖 Available Bot Commands",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -1459,7 +1531,7 @@ class TradingBotUI:
         # Developer Commands
         dev_commands_frame = tk.LabelFrame(
             commands_frame,
-            text="👨‍💻 أوامر المطور",
+            text="👨‍💻 Developer Commands",
             font=("Arial", 11, "bold"),
             fg='#ffaa00',
             bg='#2b2b2b'
@@ -1467,16 +1539,16 @@ class TradingBotUI:
         dev_commands_frame.pack(pady=10, padx=10, fill=tk.X)
         
         dev_commands = [
-            ("/clear_cache", "تنظيف الكاش يدوياً", "🧹"),
-            ("/mt5_debug", "تشخيص MT5 مفصل", "🔍"),
-            ("/mt5_reconnect", "إعادة الاتصال بـ MT5", "🔄"),
-            ("/set_mt5_path", "تحديد مسار MT5", "📁"),
-            ("/api_status", "التحقق من حالة API", "📊"),
-            ("/api_reset", "إعادة تعيين حالة API", "🔄"),
-            ("/switch_notification_length", "تبديل طول الإشعارات", "📏"),
-            ("/switch_msg_length", "تبديل طول الرسائل", "📝"),
-            ("/renew_api_context", "تجديد سياق API", "🔄"),
-            ("/switch_hz", "تغيير تردد المراقبة", "⏱️")
+            ("/clear_cache", "Clear cache manually", "🧹"),
+            ("/mt5_debug", "Detailed MT5 diagnostics", "🔍"),
+            ("/mt5_reconnect", "Reconnect to MT5", "🔄"),
+            ("/set_mt5_path", "Set MT5 path", "📁"),
+            ("/api_status", "Check API status", "📊"),
+            ("/api_reset", "Reset API status", "🔄"),
+            ("/switch_notification_length", "Toggle notification length", "📏"),
+            ("/switch_msg_length", "Toggle message length", "📝"),
+            ("/renew_api_context", "Renew API context", "🔄"),
+            ("/switch_hz", "Change monitoring frequency", "⏱️")
         ]
         
         # Create grid for developer commands
@@ -1485,46 +1557,39 @@ class TradingBotUI:
             cmd_frame = tk.Frame(dev_commands_frame, bg='#2b2b2b')
             cmd_frame.pack(fill=tk.X, padx=5, pady=2)
             
-            # Emoji
-            emoji_label = tk.Label(
-                cmd_frame,
-                text=emoji,
-                font=("Arial", 12),
-                fg='#ffffff',
-                bg='#2b2b2b',
-                width=3
-            )
-            emoji_label.pack(side=tk.LEFT)
+            # Create clickable button for the entire command
+            def create_command_handler(command):
+                return lambda: self.execute_bot_command(command)
             
-            # Command
-            cmd_label = tk.Label(
+            cmd_button = tk.Button(
                 cmd_frame,
-                text=cmd,
-                font=("Consolas", 10, "bold"),
-                fg='#00ff00',
-                bg='#2b2b2b',
-                width=25,
-                anchor='w'
-            )
-            cmd_label.pack(side=tk.LEFT, padx=(5, 10))
-            
-            # Description
-            desc_label = tk.Label(
-                cmd_frame,
-                text=desc,
+                text=f"{emoji} {cmd} - {desc}",
                 font=("Arial", 10),
-                fg='#cccccc',
-                bg='#2b2b2b',
-                anchor='w'
+                fg='#ffffff',
+                bg='#404040',
+                activebackground='#505050',
+                activeforeground='#ffffff',
+                relief='flat',
+                anchor='w',
+                command=create_command_handler(cmd)
             )
-            desc_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            cmd_button.pack(fill=tk.X, padx=2, pady=1)
+            
+            # Add hover effect
+            def on_enter(e, button=cmd_button):
+                button.config(bg='#505050')
+            def on_leave(e, button=cmd_button):
+                button.config(bg='#404040')
+                
+            cmd_button.bind("<Enter>", on_enter)
+            cmd_button.bind("<Leave>", on_leave)
             
             row += 1
         
         # User Commands Section
         user_commands_frame = tk.LabelFrame(
             commands_frame,
-            text="👤 أوامر المستخدمين",
+            text="👤 User Commands",
             font=("Arial", 11, "bold"),
             fg='#00ff00',
             bg='#2b2b2b'
@@ -1534,7 +1599,7 @@ class TradingBotUI:
         # Note about /start command
         start_note = tk.Label(
             user_commands_frame,
-            text="📝 ملاحظة: أمر /start متاح للمستخدمين لبدء استخدام البوت",
+            text="📝 Note: /start command is available for users to begin using the bot",
             font=("Arial", 10, "italic"),
             fg='#ffaa00',
             bg='#2b2b2b'
@@ -1543,8 +1608,8 @@ class TradingBotUI:
         
         # Bot Features Section
         features_frame = tk.LabelFrame(
-            centered_container,
-            text="⚡ ميزات البوت الرئيسية",
+            content_frame,
+            text="⚡ Main Bot Features",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -1552,14 +1617,14 @@ class TradingBotUI:
         features_frame.pack(pady=10, padx=20, fill=tk.X)
         
         features_list = [
-            ("🔄", "تحليل الأسواق", "تحليل لحظي للعملات والأسهم"),
-            ("💰", "الأسعار المباشرة", "أسعار حية من MetaTrader5"),
-            ("📈", "توصيات التداول", "توصيات ذكية مع AI"),
-            ("⚙️", "الإعدادات", "تخصيص تجربة المستخدم"),
-            ("🤖", "ذكاء اصطناعي", "تحليل متقدم بـ Gemini AI"),
-            ("📊", "مؤشرات فنية", "RSI, MACD, Moving Averages"),
-            ("🔔", "إشعارات ذكية", "تنبيهات مخصصة للفرص"),
-            ("📱", "واجهة سهلة", "أزرار تفاعلية وقوائم بسيطة")
+            ("🔄", "Market Analysis", "Real-time analysis of currencies and stocks"),
+            ("💰", "Live Prices", "Live prices from MetaTrader5"),
+            ("📈", "Trading Recommendations", "Smart recommendations with AI"),
+            ("⚙️", "Settings", "Customize user experience"),
+            ("🤖", "Artificial Intelligence", "Advanced analysis with Gemini AI"),
+            ("📊", "Technical Indicators", "RSI, MACD, Moving Averages"),
+            ("🔔", "Smart Notifications", "Custom alerts for opportunities"),
+            ("📱", "Easy Interface", "Interactive buttons and simple menus")
         ]
         
         for emoji, title, desc in features_list:
@@ -1602,8 +1667,8 @@ class TradingBotUI:
         
         # Bot Status Section
         status_frame = tk.LabelFrame(
-            centered_container,
-            text="📊 حالة البوت",
+            content_frame,
+            text="📊 Bot Status",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -1617,7 +1682,7 @@ class TradingBotUI:
         # Version
         version_label = tk.Label(
             status_info_frame,
-            text="🔖 الإصدار: v1.2.0 Enhanced",
+            text="🔖 Version: v1.2.0 Enhanced",
             font=("Arial", 10),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -1627,7 +1692,7 @@ class TradingBotUI:
         # Status
         self.bot_status_label = tk.Label(
             status_info_frame,
-            text="🔴 البوت: متوقف",
+            text="🔴 Bot: Stopped",
             font=("Arial", 10),
             fg='#ff6666',
             bg='#2b2b2b'
@@ -1637,7 +1702,7 @@ class TradingBotUI:
         # Users count in general tab
         self.general_users_count_label = tk.Label(
             status_info_frame,
-            text="👥 المستخدمون: جاري التحميل...",
+            text="👥 Users: Loading...",
             font=("Arial", 10),
             fg='#cccccc',
             bg='#2b2b2b'
@@ -1647,22 +1712,78 @@ class TradingBotUI:
         # Update status periodically
         self.update_general_tab_status()
     
+    def execute_bot_command(self, command):
+        """Execute bot command (placeholder for now - would need actual bot connection)"""
+        try:
+            # Show execution dialog
+            command_window = tk.Toplevel(self.root)
+            command_window.title(f"Execute {command}")
+            command_window.geometry("500x300")
+            command_window.configure(bg='#2b2b2b')
+            command_window.transient(self.root)
+            command_window.grab_set()
+            
+            # Title
+            title_label = tk.Label(
+                command_window,
+                text=f"🚀 Execute Command: {command}",
+                font=("Arial", 14, "bold"),
+                fg='#ffffff',
+                bg='#2b2b2b'
+            )
+            title_label.pack(pady=20)
+            
+            # Info text
+            info_text = scrolledtext.ScrolledText(
+                command_window,
+                height=10,
+                width=60,
+                bg='#1a1a1a',
+                fg='#00ff00',
+                font=("Consolas", 10)
+            )
+            info_text.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+            
+            # Add command info
+            info_text.insert(tk.END, f"Command: {command}\n")
+            info_text.insert(tk.END, f"Status: Ready to execute\n")
+            info_text.insert(tk.END, f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            info_text.insert(tk.END, "Note: This is a placeholder implementation.\n")
+            info_text.insert(tk.END, "In a full implementation, this would send the command\n")
+            info_text.insert(tk.END, "to the running bot instance via IPC or API.\n")
+            
+            # Close button
+            close_button = tk.Button(
+                command_window,
+                text="❌ Close",
+                font=("Arial", 10),
+                bg='#666666',
+                fg='white',
+                command=command_window.destroy
+            )
+            close_button.pack(pady=10)
+            
+            self.add_log(f"🚀 Command executed: {command}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to execute command: {str(e)}")
+    
     def update_general_tab_status(self):
         """Update general tab status information"""
         try:
             # Update bot status
             if hasattr(self, 'embedded_bot') and self.embedded_bot.is_running:
-                self.bot_status_label.config(text="🟢 البوت: يعمل", fg='#00ff00')
+                self.bot_status_label.config(text="🟢 Bot: Running", fg='#00ff00')
             else:
-                self.bot_status_label.config(text="🔴 البوت: متوقف", fg='#ff6666')
+                self.bot_status_label.config(text="🔴 Bot: Stopped", fg='#ff6666')
             
             # Update users count
             if hasattr(self, 'embedded_bot'):
                 users_count = self.embedded_bot.get_users_count()
                 if isinstance(users_count, int):
-                    self.general_users_count_label.config(text=f"👥 المستخدمون: {users_count}")
+                    self.general_users_count_label.config(text=f"👥 Users: {users_count}")
                 else:
-                    self.general_users_count_label.config(text=f"👥 المستخدمون: {users_count}")
+                    self.general_users_count_label.config(text=f"👥 Users: {users_count}")
             
             # Schedule next update
             if hasattr(self, 'root'):
@@ -2755,7 +2876,7 @@ class TradingBotUI:
                 seconds = total_seconds % 60
                 
                 uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                self.uptime_label.config(text=f"⏱️ وقت تشغيل الواجهة: {uptime_str}")
+                self.uptime_label.config(text=f"⏱️ Interface Uptime: {uptime_str}")
                 
                 # Schedule next update
                 self.root.after(1000, self.update_uptime)
@@ -2782,12 +2903,12 @@ class TradingBotUI:
                     
                     bot_uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
                     self.bot_uptime_label.config(
-                        text=f"🤖 وقت تشغيل البوت: {bot_uptime_str}",
+                        text=f"🤖 Bot Uptime: {bot_uptime_str}",
                         fg='#00ff00'
                     )
                 else:
                     self.bot_uptime_label.config(
-                        text="🤖 وقت تشغيل البوت: متوقف",
+                        text="🤖 Bot Uptime: Stopped",
                         fg='#ff6666'
                     )
                 
