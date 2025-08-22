@@ -999,6 +999,9 @@ class TradingBotUI:
         
         # Users tab
         self.create_users_tab(notebook)
+        
+        # Security tab (with additional password protection)
+        self.create_security_tab(notebook)
     
     def create_configurations_tab(self, notebook):
         """Create configurations tab"""
@@ -1379,6 +1382,313 @@ class TradingBotUI:
     def refresh_users_tab(self, tree):
         """Refresh users tab tree"""
         self.refresh_users_management(tree)
+    
+    def create_security_tab(self, notebook):
+        """Create security and protection tab with additional password protection"""
+        # Create a frame that will show password prompt first
+        security_outer_frame = tk.Frame(notebook, bg='#2b2b2b')
+        notebook.add(security_outer_frame, text="🔐 Security")
+        
+        # Initially show password prompt
+        self.security_password_frame = tk.Frame(security_outer_frame, bg='#2b2b2b')
+        self.security_password_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Password prompt for security tab
+        security_title = tk.Label(
+            self.security_password_frame,
+            text="🔐 تبويب الحماية والأمان",
+            font=("Arial", 18, "bold"),
+            fg='#ff6666',
+            bg='#2b2b2b'
+        )
+        security_title.pack(pady=50)
+        
+        security_warning = tk.Label(
+            self.security_password_frame,
+            text="⚠️ هذا التبويب يحتوي على إعدادات حساسة\nيرجى إدخال كلمة المرور للمتابعة",
+            font=("Arial", 12),
+            fg='#ffaa00',
+            bg='#2b2b2b',
+            justify=tk.CENTER
+        )
+        security_warning.pack(pady=20)
+        
+        # Password entry for security tab
+        security_password_entry = tk.Entry(
+            self.security_password_frame,
+            font=("Arial", 14),
+            show="*",
+            width=20,
+            justify='center',
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        security_password_entry.pack(pady=20)
+        
+        # Access button
+        def access_security_tab():
+            entered_password = security_password_entry.get()
+            if entered_password == self.PASSWORD:
+                # Hide password prompt and show security content
+                self.security_password_frame.pack_forget()
+                self.create_security_content(security_outer_frame)
+                self.add_log("🔐 تم الوصول إلى تبويب الحماية والأمان")
+            else:
+                messagebox.showerror("خطأ", "كلمة مرور خاطئة!")
+                security_password_entry.delete(0, tk.END)
+        
+        access_button = tk.Button(
+            self.security_password_frame,
+            text="🔓 دخول",
+            font=("Arial", 12, "bold"),
+            bg='#ff6666',
+            fg='white',
+            width=15,
+            height=2,
+            command=access_security_tab
+        )
+        access_button.pack(pady=20)
+        
+        # Bind Enter key to access button
+        security_password_entry.bind('<Return>', lambda event: access_security_tab())
+        
+        # Focus on password entry when tab is selected
+        def on_tab_selected(event):
+            if notebook.index(notebook.select()) == 2:  # Security tab index
+                security_password_entry.focus()
+        
+        notebook.bind("<<NotebookTabChanged>>", on_tab_selected)
+    
+    def create_security_content(self, parent_frame):
+        """Create the actual security tab content"""
+        # Main security frame
+        security_frame = tk.Frame(parent_frame, bg='#2b2b2b')
+        security_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Title
+        title_label = tk.Label(
+            security_frame,
+            text="🔐 إعدادات الحماية والأمان",
+            font=("Arial", 16, "bold"),
+            fg='#ff6666',
+            bg='#2b2b2b'
+        )
+        title_label.pack(pady=10)
+        
+        # Password change section
+        password_frame = tk.LabelFrame(
+            security_frame,
+            text="🔑 تغيير كلمات المرور",
+            font=("Arial", 12, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        password_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Current bot password display
+        current_password_label = tk.Label(
+            password_frame,
+            text="كلمة مرور البوت الحالية:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        current_password_label.grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.current_bot_password_display = tk.Label(
+            password_frame,
+            text=EMBEDDED_CONFIG.get('BOT_PASSWORD', 'tra12345678'),
+            font=("Arial", 10, "bold"),
+            fg='#ffaa00',
+            bg='#2b2b2b'
+        )
+        self.current_bot_password_display.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+        
+        # New bot password
+        new_password_label = tk.Label(
+            password_frame,
+            text="كلمة مرور البوت الجديدة:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        new_password_label.grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.new_bot_password_entry = tk.Entry(
+            password_frame,
+            font=("Arial", 10),
+            width=30,
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        self.new_bot_password_entry.grid(row=1, column=1, padx=5, pady=5)
+        
+        # Confirm new password
+        confirm_password_label = tk.Label(
+            password_frame,
+            text="تأكيد كلمة المرور الجديدة:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        confirm_password_label.grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.confirm_bot_password_entry = tk.Entry(
+            password_frame,
+            font=("Arial", 10),
+            width=30,
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        self.confirm_bot_password_entry.grid(row=2, column=1, padx=5, pady=5)
+        
+        # Change password button
+        change_password_frame = tk.Frame(password_frame, bg='#2b2b2b')
+        change_password_frame.grid(row=3, column=0, columnspan=2, pady=15)
+        
+        change_password_button = tk.Button(
+            change_password_frame,
+            text="🔑 تغيير كلمة مرور البوت",
+            font=("Arial", 11, "bold"),
+            bg='#ff6666',
+            fg='white',
+            command=self.change_bot_password
+        )
+        change_password_button.pack(side=tk.LEFT, padx=5)
+        
+        reset_password_button = tk.Button(
+            change_password_frame,
+            text="🔄 إعادة تعيين للافتراضي",
+            font=("Arial", 11, "bold"),
+            bg='#666666',
+            fg='white',
+            command=self.reset_bot_password
+        )
+        reset_password_button.pack(side=tk.LEFT, padx=5)
+        
+        # UI Password change section
+        ui_password_frame = tk.LabelFrame(
+            security_frame,
+            text="🖥️ تغيير كلمة مرور الواجهة",
+            font=("Arial", 12, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        ui_password_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Current UI password (masked)
+        current_ui_label = tk.Label(
+            ui_password_frame,
+            text="كلمة مرور الواجهة الحالية:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        current_ui_label.grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        current_ui_display = tk.Label(
+            ui_password_frame,
+            text="*" * len(self.PASSWORD),
+            font=("Arial", 10, "bold"),
+            fg='#ffaa00',
+            bg='#2b2b2b'
+        )
+        current_ui_display.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+        
+        # New UI password
+        new_ui_password_label = tk.Label(
+            ui_password_frame,
+            text="كلمة مرور الواجهة الجديدة:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        new_ui_password_label.grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.new_ui_password_entry = tk.Entry(
+            ui_password_frame,
+            font=("Arial", 10),
+            width=30,
+            show="*",
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        self.new_ui_password_entry.grid(row=1, column=1, padx=5, pady=5)
+        
+        # Confirm new UI password
+        confirm_ui_password_label = tk.Label(
+            ui_password_frame,
+            text="تأكيد كلمة مرور الواجهة:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        confirm_ui_password_label.grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.confirm_ui_password_entry = tk.Entry(
+            ui_password_frame,
+            font=("Arial", 10),
+            width=30,
+            show="*",
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        self.confirm_ui_password_entry.grid(row=2, column=1, padx=5, pady=5)
+        
+        # Change UI password button
+        change_ui_password_button = tk.Button(
+            ui_password_frame,
+            text="🔐 تغيير كلمة مرور الواجهة",
+            font=("Arial", 11, "bold"),
+            bg='#ff6666',
+            fg='white',
+            command=self.change_ui_password
+        )
+        change_ui_password_button.grid(row=3, column=0, columnspan=2, pady=15)
+        
+        # Security info section
+        info_frame = tk.LabelFrame(
+            security_frame,
+            text="ℹ️ معلومات الأمان",
+            font=("Arial", 12, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        info_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        security_info = tk.Text(
+            info_frame,
+            height=8,
+            width=70,
+            bg='#1a1a1a',
+            fg='#cccccc',
+            font=("Arial", 9),
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        security_info.pack(padx=10, pady=10)
+        
+        # Add security information
+        security_text = """🔐 معلومات الحماية والأمان:
+
+• كلمة مرور البوت: تُستخدم للمصادقة داخل Telegram
+• كلمة مرور الواجهة: تُستخدم للوصول إلى واجهة التحكم
+• تبويب الحماية: يتطلب كلمة مرور إضافية للوصول
+
+⚠️ تحذيرات مهمة:
+• احتفظ بنسخة احتياطية من كلمات المرور
+• استخدم كلمات مرور قوية ومعقدة
+• لا تشارك كلمات المرور مع أشخاص غير مخولين
+• تغيير كلمة مرور البوت يتطلب إعادة تشغيل البوت
+
+💡 نصائح الأمان:
+• استخدم أرقام وحروف ورموز في كلمات المرور
+• تجنب استخدام معلومات شخصية
+• غير كلمات المرور بانتظام"""
+
+        security_info.config(state=tk.NORMAL)
+        security_info.insert("1.0", security_text)
+        security_info.config(state=tk.DISABLED)
     
     def refresh_api_keys(self):
         """Refresh API keys listbox"""
@@ -1820,6 +2130,116 @@ class TradingBotUI:
         except Exception as e:
             # Silent error handling for bot uptime
             pass
+    
+    def change_bot_password(self):
+        """Change bot password"""
+        try:
+            new_password = self.new_bot_password_entry.get().strip()
+            confirm_password = self.confirm_bot_password_entry.get().strip()
+            
+            # Validation
+            if not new_password:
+                messagebox.showwarning("تحذير", "يرجى إدخال كلمة المرور الجديدة")
+                return
+            
+            if len(new_password) < 6:
+                messagebox.showwarning("تحذير", "كلمة المرور يجب أن تكون 6 أحرف على الأقل")
+                return
+            
+            if new_password != confirm_password:
+                messagebox.showerror("خطأ", "كلمة المرور وتأكيدها غير متطابقين")
+                return
+            
+            # Confirm change
+            result = messagebox.askyesno(
+                "تأكيد التغيير",
+                f"هل أنت متأكد من تغيير كلمة مرور البوت إلى:\n'{new_password}'?\n\nسيتطلب هذا إعادة تشغيل البوت إذا كان يعمل."
+            )
+            
+            if result:
+                # Update config
+                EMBEDDED_CONFIG['BOT_PASSWORD'] = new_password
+                self.save_config()
+                
+                # Update display
+                self.current_bot_password_display.config(text=new_password)
+                
+                # Clear entries
+                self.new_bot_password_entry.delete(0, tk.END)
+                self.confirm_bot_password_entry.delete(0, tk.END)
+                
+                # Update embedded bot config
+                self.embedded_bot.config = EMBEDDED_CONFIG
+                
+                messagebox.showinfo("نجح", "تم تغيير كلمة مرور البوت بنجاح!\n\nإذا كان البوت يعمل، يرجى إعادة تشغيله لتطبيق التغيير.")
+                self.add_log(f"🔑 تم تغيير كلمة مرور البوت إلى: {new_password}")
+                
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في تغيير كلمة المرور: {str(e)}")
+    
+    def reset_bot_password(self):
+        """Reset bot password to default"""
+        try:
+            result = messagebox.askyesno(
+                "إعادة تعيين كلمة المرور",
+                "هل أنت متأكد من إعادة تعيين كلمة مرور البوت إلى القيمة الافتراضية؟\n\n(tra12345678)"
+            )
+            
+            if result:
+                default_password = "tra12345678"
+                EMBEDDED_CONFIG['BOT_PASSWORD'] = default_password
+                self.save_config()
+                
+                # Update display
+                self.current_bot_password_display.config(text=default_password)
+                
+                # Update embedded bot config
+                self.embedded_bot.config = EMBEDDED_CONFIG
+                
+                messagebox.showinfo("نجح", "تم إعادة تعيين كلمة مرور البوت للقيمة الافتراضية")
+                self.add_log("🔄 تم إعادة تعيين كلمة مرور البوت للافتراضي")
+                
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في إعادة تعيين كلمة المرور: {str(e)}")
+    
+    def change_ui_password(self):
+        """Change UI password"""
+        try:
+            new_password = self.new_ui_password_entry.get().strip()
+            confirm_password = self.confirm_ui_password_entry.get().strip()
+            
+            # Validation
+            if not new_password:
+                messagebox.showwarning("تحذير", "يرجى إدخال كلمة المرور الجديدة")
+                return
+            
+            if len(new_password) < 6:
+                messagebox.showwarning("تحذير", "كلمة المرور يجب أن تكون 6 أحرف على الأقل")
+                return
+            
+            if new_password != confirm_password:
+                messagebox.showerror("خطأ", "كلمة المرور وتأكيدها غير متطابقين")
+                return
+            
+            # Confirm change
+            result = messagebox.askyesno(
+                "تأكيد التغيير",
+                f"هل أنت متأكد من تغيير كلمة مرور الواجهة؟\n\nستحتاج لاستخدام كلمة المرور الجديدة في المرة القادمة."
+            )
+            
+            if result:
+                # Update password
+                self.PASSWORD = new_password
+                
+                # Clear entries
+                self.new_ui_password_entry.delete(0, tk.END)
+                self.confirm_ui_password_entry.delete(0, tk.END)
+                
+                messagebox.showinfo("نجح", "تم تغيير كلمة مرور الواجهة بنجاح!\n\nستحتاج لاستخدام كلمة المرور الجديدة في المرة القادمة.")
+                self.add_log(f"🔐 تم تغيير كلمة مرور الواجهة")
+                
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في تغيير كلمة مرور الواجهة: {str(e)}")
     
     def save_config(self):
         """Save configuration to file"""
