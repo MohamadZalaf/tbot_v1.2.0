@@ -85,7 +85,7 @@ monitoring_active = False
 MONITORING_FREQUENCY = 30  # التردد الافتراضي 30 ثانية
 
 # متغير للتحكم في طول الإشعارات (True = قصير، False = طويل)
-SHORT_NOTIFICATIONS = False
+SHORT_NOTIFICATIONS = True
 
 # إضافة locks لتجنب التضارب في عمليات MT5
 import threading
@@ -1089,15 +1089,18 @@ def format_very_short_alert_message(symbol: str, symbol_info: Dict, price_data: 
         action = analysis.get('action')
         confidence = analysis.get('confidence', 0)
         
-        # الحصول على الأهداف ووقف الخسارة
+        # الحصول على الأهداف ووقف الخسارة - نفس متغيرات الرسالة الطويلة
         entry_price = analysis.get('entry_price') or current_price
         target1 = analysis.get('target1')
+        target2 = analysis.get('target2') or analysis.get('tp2')  # إضافة الهدف الثاني
         stop_loss = analysis.get('stop_loss')
+        risk_reward_ratio = analysis.get('risk_reward')
         
-        # حساب النقاط
+        # حساب النقاط - نفس طريقة الرسالة الطويلة
         asset_type, pip_size = get_asset_type_and_pip_size(symbol)
         
         target_points = 0
+        target2_points = 0
         stop_points = 0
         
         if target1 and entry_price:
@@ -1106,32 +1109,88 @@ def format_very_short_alert_message(symbol: str, symbol_info: Dict, price_data: 
             elif action == 'SELL':
                 target_points = abs(entry_price - target1) / pip_size
         
+        if target2 and entry_price:
+            if action == 'BUY':
+                target2_points = abs(target2 - entry_price) / pip_size
+            elif action == 'SELL':
+                target2_points = abs(entry_price - target2) / pip_size
+        
         if stop_loss and entry_price:
             if action == 'BUY':
                 stop_points = abs(entry_price - stop_loss) / pip_size
             elif action == 'SELL':
                 stop_points = abs(stop_loss - entry_price) / pip_size
         
+        # حساب نسبة المخاطرة/المكافأة إذا لم تكن متوفرة
+        if not risk_reward_ratio and stop_points > 0 and target_points > 0:
+            risk_reward_ratio = target_points / stop_points
+        
         # تحديد نوع الصفقة
         trade_type = "شراء" if action == 'BUY' else "بيع" if action == 'SELL' else "انتظار"
         
-        # تحديد الفريم (افتراضي M15)
+        # تحديد الفريم (ثابت M15)
         timeframe = "M15"
         
-        # تحديد السبب (مبسط)
-        reason = "تقاطع EMA + كسر مقاومة" if action == 'BUY' else "تقاطع EMA + كسر دعم" if action == 'SELL' else "عدم وضوح الاتجاه"
+        # جلب تفسير AI مختصر للمؤشرات في الفريم 15 دقيقة
+        ai_explanation = ""
+        try:
+            # استخدام Gemini AI لتفسير سبب نسبة النجاح بناءً على مؤشرات الـ 15 دقيقة
+            technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
+            indicators = technical_data.get('indicators', {}) if technical_data else {}
+            
+            if indicators:
+                # تحضير بيانات المؤشرات للـ AI
+                rsi = indicators.get('rsi', 50)
+                macd = indicators.get('macd', {})
+                ma_20 = indicators.get('ma_20', 0)
+                ma_50 = indicators.get('ma_50', 0)
+                volume_ratio = indicators.get('volume_ratio', 1.0)
+                
+                # طلب تفسير مختصر من AI
+                prompt = f"""بناءً على مؤشرات الـ 15 دقيقة للرمز {symbol}:
+RSI: {rsi:.1f}, MACD: {macd.get('macd', 0):.4f}, MA20: {ma_20:.5f}, MA50: {ma_50:.5f}, Volume: {volume_ratio:.1f}x
+اكتب سطر أو سطرين مختصرين يفسران لماذا نسبة النجاح المتوقعة هي {confidence:.0f}% للصفقة {trade_type}."""
+                
+                # استخدام Gemini لتوليد التفسير
+                if gemini_analyzer.model:
+                    response = gemini_analyzer.model.generate_content(prompt)
+                    if response and response.text:
+                        ai_explanation = response.text.strip()
+                        # تحديد طول التفسير لسطرين كحد أقصى
+                        lines = ai_explanation.split('\n')
+                        if len(lines) > 2:
+                            ai_explanation = '\n'.join(lines[:2])
+        except Exception as e:
+            logger.warning(f"[AI_EXPLANATION] فشل في توليد تفسير AI للرمز {symbol}: {e}")
+            # تفسير افتراضي مختصر
+            if action == 'BUY':
+                ai_explanation = f"RSI منخفض وتقاطع إيجابي في MA يدعم الشراء بنسبة {confidence:.0f}%"
+            elif action == 'SELL':
+                ai_explanation = f"RSI مرتفع وضغط بيعي في المؤشرات يدعم البيع بنسبة {confidence:.0f}%"
+            else:
+                ai_explanation = f"إشارات متضاربة في الفريم 15د تستدعي الانتظار بنسبة {confidence:.0f}%"
         
-        message = f"""📊 **صفقة مقترحة**
+        # تنسيق الرسالة المختصرة مع نفس متغيرات الرسالة الطويلة
+        message = f"""📊 **صفقة مقترحة** {symbol_info['emoji']}
 
-**الزوج:** {symbol}
-**نوع الصفقة:** {trade_type}
-**سعر الدخول:** {entry_price:.5f}
-**الهدف:** ({target_points:.0f} نقطة)
-**وقف الخسارة:** (-{stop_points:.0f} نقطة)
-
-⏰ **الفريم:** {timeframe}
-📈 **نسبة النجاح المتوقعة:** {confidence:.0f}%
-💡 **السبب:** {reason}"""
+**{symbol}** | {trade_type} | **{entry_price:.5f}**
+🎯 **TP1:** {target_points:.0f}ن"""
+        
+        # إضافة الهدف الثاني إذا كان متوفراً
+        if target2_points > 0:
+            message += f" | **TP2:** {target2_points:.0f}ن"
+        
+        message += f" | 🛑 **SL:** {stop_points:.0f}ن"
+        
+        # إضافة نسبة المخاطرة/المكافأة إذا كانت متوفرة
+        if risk_reward_ratio and risk_reward_ratio > 0:
+            message += f"\n📊 **R/R:** 1:{risk_reward_ratio:.1f}"
+        
+        message += f" | ✅ **{confidence:.0f}%**"
+        
+        # إضافة تفسير AI المختصر
+        if ai_explanation:
+            message += f"\n\n💡 **{timeframe}:** {ai_explanation}"
         
         return message
         
