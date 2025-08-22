@@ -774,7 +774,7 @@ def handle_api_reset_command(message):
         logger.error(f"[API_RESET_CMD] خطأ في معالجة أمر إعادة تعيين API: {e}")
         bot.reply_to(message, f"❌ خطأ في إعادة تعيين API: {str(e)}")
 
-@bot.message_handler(commands=['switch_notification_length'])
+@bot.message_handler(commands=['switch_notification_length', 'switch_msg_length'])
 def handle_switch_notification_length_command(message):
     """معالج أمر تبديل طول الإشعارات - للمطور فقط"""
     try:
@@ -806,8 +806,11 @@ def handle_switch_notification_length_command(message):
         
         # إشعار جميع المستخدمين النشطين
         try:
-            # جلب قائمة المستخدمين النشطين
-            active_users = get_active_users()  # دالة موجودة مسبقاً
+            # جلب قائمة المستخدمين النشطين من user_sessions
+            active_users = []
+            for user_id_key, session in user_sessions.items():
+                if session.get('authenticated', False):
+                    active_users.append(user_id_key)
             
             notification_message = f"""
 🔄 **تحديث نظام الإشعارات**
@@ -822,16 +825,16 @@ def handle_switch_notification_length_command(message):
             sent_count = 0
             failed_count = 0
             
-            for user_id in active_users:
+            for user_id_to_notify in active_users:
                 try:
                     bot.send_message(
-                        chat_id=user_id,
+                        chat_id=user_id_to_notify,
                         text=notification_message,
                         parse_mode='Markdown'
                     )
                     sent_count += 1
                 except Exception as send_error:
-                    logger.error(f"[NOTIFICATION_SWITCH] فشل إرسال إشعار التبديل للمستخدم {user_id}: {send_error}")
+                    logger.error(f"[NOTIFICATION_SWITCH] فشل إرسال إشعار التبديل للمستخدم {user_id_to_notify}: {send_error}")
                     failed_count += 1
             
             # تقرير للمطور
@@ -2026,9 +2029,73 @@ def handle_switch_hz_command(message):
 • 150 ثانية ⏰: مراقبة متوسطة وموفرة للموارد
 
 ⚠️ **ملاحظة:** التغيير سيؤثر على جميع دورات المراقبة القادمة
+
+سيتم إشعار جميع المستخدمين بالتغيير...
         """
         
         bot.reply_to(message, response_message.strip(), parse_mode='Markdown')
+        
+        # إشعار جميع المستخدمين النشطين بتغيير التردد
+        try:
+            # جلب قائمة المستخدمين النشطين من user_sessions
+            active_users = []
+            for user_id_key, session in user_sessions.items():
+                if session.get('authenticated', False):
+                    active_users.append(user_id_key)
+            
+            user_notification_message = f"""
+🔄 **تحديث تردد المراقبة**
+
+تم تغيير تردد مراقبة السوق إلى **{new_frequency_text}**
+
+📊 **التأثير على إشعاراتك:**
+• {frequency_description}
+• {'إشعارات أكثر تكراراً وسرعة' if MONITORING_FREQUENCY == 30 else 'إشعارات أقل تكراراً وأكثر دقة'}
+
+🤖 **بوت التداول v1.2.0**
+            """
+            
+            sent_count = 0
+            failed_count = 0
+            
+            for user_id_to_notify in active_users:
+                try:
+                    bot.send_message(
+                        chat_id=user_id_to_notify,
+                        text=user_notification_message,
+                        parse_mode='Markdown'
+                    )
+                    sent_count += 1
+                except Exception as send_error:
+                    logger.error(f"[HZ_SWITCH] فشل إرسال إشعار تغيير التردد للمستخدم {user_id_to_notify}: {send_error}")
+                    failed_count += 1
+            
+            # تقرير للمطور
+            report_message = f"""
+📊 **تقرير إشعار تغيير التردد**
+
+✅ تم الإرسال: {sent_count} مستخدم
+❌ فشل الإرسال: {failed_count} مستخدم
+📊 إجمالي المستخدمين: {len(active_users)}
+🔄 التردد الجديد: {MONITORING_FREQUENCY} ثانية
+            """
+            
+            bot.send_message(
+                chat_id=DEVELOPER_ID,
+                text=report_message,
+                parse_mode='Markdown'
+            )
+            
+            logger.info(f"[HZ_SWITCH] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية وإشعار {sent_count} مستخدم")
+            
+        except Exception as notification_error:
+            logger.error(f"[HZ_SWITCH] خطأ في إرسال إشعارات تغيير التردد: {notification_error}")
+            bot.send_message(
+                chat_id=DEVELOPER_ID,
+                text=f"❌ فشل في إرسال إشعارات تغيير التردد: {str(notification_error)}",
+                parse_mode='Markdown'
+            )
+        
         logger.info(f"[SWITCH_HZ] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية بواسطة المطور")
         
     except Exception as e:
