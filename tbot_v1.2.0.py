@@ -85,7 +85,7 @@ monitoring_active = False
 MONITORING_FREQUENCY = 30  # التردد الافتراضي 30 ثانية
 
 # متغير للتحكم في طول الإشعارات (True = قصير، False = طويل)
-SHORT_NOTIFICATIONS = False
+SHORT_NOTIFICATIONS = True
 
 # إضافة locks لتجنب التضارب في عمليات MT5
 import threading
@@ -774,7 +774,7 @@ def handle_api_reset_command(message):
         logger.error(f"[API_RESET_CMD] خطأ في معالجة أمر إعادة تعيين API: {e}")
         bot.reply_to(message, f"❌ خطأ في إعادة تعيين API: {str(e)}")
 
-@bot.message_handler(commands=['switch_notification_length'])
+@bot.message_handler(commands=['switch_notification_length', 'switch_msg_length'])
 def handle_switch_notification_length_command(message):
     """معالج أمر تبديل طول الإشعارات - للمطور فقط"""
     try:
@@ -806,8 +806,11 @@ def handle_switch_notification_length_command(message):
         
         # إشعار جميع المستخدمين النشطين
         try:
-            # جلب قائمة المستخدمين النشطين
-            active_users = get_active_users()  # دالة موجودة مسبقاً
+            # جلب قائمة المستخدمين النشطين من user_sessions
+            active_users = []
+            for user_id_key, session in user_sessions.items():
+                if session.get('authenticated', False):
+                    active_users.append(user_id_key)
             
             notification_message = f"""
 🔄 **تحديث نظام الإشعارات**
@@ -822,16 +825,16 @@ def handle_switch_notification_length_command(message):
             sent_count = 0
             failed_count = 0
             
-            for user_id in active_users:
+            for user_id_to_notify in active_users:
                 try:
                     bot.send_message(
-                        chat_id=user_id,
+                        chat_id=user_id_to_notify,
                         text=notification_message,
                         parse_mode='Markdown'
                     )
                     sent_count += 1
                 except Exception as send_error:
-                    logger.error(f"[NOTIFICATION_SWITCH] فشل إرسال إشعار التبديل للمستخدم {user_id}: {send_error}")
+                    logger.error(f"[NOTIFICATION_SWITCH] فشل إرسال إشعار التبديل للمستخدم {user_id_to_notify}: {send_error}")
                     failed_count += 1
             
             # تقرير للمطور
@@ -1081,57 +1084,501 @@ def calculate_points_accurately(price_diff, symbol, capital=None, current_price=
         logger.error(f"خطأ في حساب النقاط للرمز {symbol}: {e}")
         return 0
 
+def extract_short_message_from_long(long_message: str, symbol: str, symbol_info: Dict, price_data: Dict, analysis: Dict, user_id: int) -> str:
+    """استخراج رسالة مختصرة من الرسالة الطويلة مع نفس القيم تماماً"""
+    try:
+        # استخراج القيم من الرسالة الطويلة باستخدام regex
+        import re
+        
+        # استخراج نوع الصفقة
+        trade_type_match = re.search(r'🟢 نوع الصفقة: (.+?) \(', long_message) or re.search(r'🔴 نوع الصفقة: (.+?) \(', long_message) or re.search(r'🟡 نوع الصفقة: (.+?) \(', long_message)
+        trade_type = trade_type_match.group(1) if trade_type_match else "غير محدد"
+        
+        # استخراج سعر الدخول
+        entry_price_match = re.search(r'📍 سعر الدخول المقترح: ([\d,\.]+)', long_message)
+        entry_price = entry_price_match.group(1) if entry_price_match else "0.00000"
+        
+        # استخراج الهدف الأول
+        target1_match = re.search(r'🎯 الهدف الأول: \((\d+) نقطة\)', long_message)
+        target1_points = target1_match.group(1) if target1_match else "0"
+        
+        # استخراج وقف الخسارة
+        stop_loss_match = re.search(r'🛑 وقف الخسارة: \((\d+) نقطة\)', long_message)
+        stop_loss_points = stop_loss_match.group(1) if stop_loss_match else "0"
+        
+        # استخراج نسبة النجاح
+        success_rate_match = re.search(r'✅ نسبة نجاح الصفقة: (\d+)%', long_message)
+        success_rate = success_rate_match.group(1) if success_rate_match else "0"
+        
+        # الفريم ثابت M15
+        timeframe = "M15"
+        
+        # جلب تفسير AI مختصر للفريم M15
+        ai_explanation = ""
+        try:
+            # استخدام Gemini AI لتفسير مختصر جداً
+            technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
+            indicators = technical_data.get('indicators', {}) if technical_data else {}
+            
+            if indicators and gemini_analyzer.model:
+                rsi = indicators.get('rsi', 50)
+                macd = indicators.get('macd', {})
+                
+                # طلب تفسير مختصر جداً من AI
+                prompt = f"""للرمز {symbol} في الفريم 15 دقيقة:
+RSI: {rsi:.1f}, MACD: {macd.get('macd', 0):.4f}
+اكتب سطر واحد مختصر جداً (أقل من 50 كلمة) يفسر سبب نسبة النجاح {success_rate}% للصفقة {trade_type}."""
+                
+                response = gemini_analyzer.model.generate_content(prompt)
+                if response and response.text:
+                    ai_explanation = response.text.strip()
+                    # تحديد طول التفسير لسطر واحد فقط
+                    if '\n' in ai_explanation:
+                        ai_explanation = ai_explanation.split('\n')[0]
+                    # قطع التفسير إذا كان طويلاً جداً
+                    if len(ai_explanation) > 100:
+                        ai_explanation = ai_explanation[:97] + "..."
+        except Exception as e:
+            logger.warning(f"[AI_SHORT_EXPLANATION] فشل في توليد تفسير مختصر للرمز {symbol}: {e}")
+            # تفسير افتراضي قصير جداً بناءً على البيانات الفعلية
+            try:
+                technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
+                indicators = technical_data.get('indicators', {}) if technical_data else {}
+                rsi = indicators.get('rsi', 50)
+                ai_explanation = f"RSI {rsi:.0f} يدعم {trade_type} بنسبة {success_rate}%"
+            except:
+                ai_explanation = f"تحليل فني يدعم {trade_type} بنسبة {success_rate}%"
+        
+        # تنسيق الرسالة المختصرة حسب التصميم المطلوب
+        message = f"""📊 **صفقة مقترحة**
+
+**الزوج:** {symbol}
+**نوع الصفقة:** {trade_type}
+**سعر الدخول:** {entry_price}
+**الهدف:** ({target1_points} نقطة)
+**وقف الخسارة:** (-{stop_loss_points} نقطة)
+
+⏰ **الفريم:** {timeframe}
+📈 **نسبة النجاح المتوقعة:** {success_rate}%
+💡 **السبب:** {ai_explanation}"""
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في استخراج الرسالة المختصرة: {e}")
+        return f"📊 **صفقة مقترحة**\n\n**الزوج:** {symbol}\nحدث خطأ في التنسيق"
+
 # دالة تنسيق رسائل الإشعارات المختصرة
 def format_very_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict, analysis: Dict, user_id: int) -> str:
-    """تنسيق رسائل الإشعارات القصيرة جداً حسب التصميم الجديد"""
+    """تنسيق رسائل الإشعارات القصيرة جداً - نفس القيم من الرسالة الطويلة تماماً"""
     try:
+        # استخدام نفس منطق الرسالة الطويلة بالكامل لضمان التطابق التام
+        # استخدام نفس أسلوب جلب البيانات من التحليل اليدوي
         current_price = price_data.get('last', price_data.get('bid', 0))
         action = analysis.get('action')
-        confidence = analysis.get('confidence', 0)
+        confidence = analysis.get('confidence')
         
-        # الحصول على الأهداف ووقف الخسارة
-        entry_price = analysis.get('entry_price') or current_price
-        target1 = analysis.get('target1')
-        stop_loss = analysis.get('stop_loss')
+        # استخدام نفس منطق الوقت من التحليل اليدوي الصحيح
+        if user_id:
+            formatted_time = format_time_for_user(user_id)
+        else:
+            formatted_time = f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (التوقيت المحلي)"
         
-        # حساب النقاط
+        # التحقق من صحة البيانات الأساسية - نفس منطق الرسالة الطويلة
+        if current_price <= 0:
+            current_price = max(price_data.get('bid', 0), price_data.get('ask', 0))
+        if not current_price:
+            # محاولة أخيرة لجلب السعر
+            retry_price_data = mt5_manager.get_live_price(symbol)
+            if retry_price_data and retry_price_data.get('last', 0) > 0:
+                current_price = retry_price_data['last']
+        
+        # جلب المؤشرات الفنية الحقيقية باستخدام نفس الطريقة من التحليل اليدوي
+        technical_data = None
+        indicators = {}
+        try:
+            technical_data = mt5_manager.calculate_technical_indicators(symbol)
+            indicators = technical_data.get('indicators', {}) if technical_data else {}
+        except Exception as e:
+            logger.warning(f"[WARNING] فشل في جلب المؤشرات الفنية للرمز {symbol}: {e}")
+            indicators = {}
+        
+        # حساب نسبة النجاح الديناميكية باستخدام AI دائماً - نفس منطق الرسالة الطويلة
+        try:
+            # التأكد من أن AI يدرس المؤشرات دائماً ويحسب النسبة
+            ai_success_rate = calculate_ai_success_rate(analysis, technical_data, symbol, action, user_id)
+            
+            # التأكد من أن النسبة ضمن النطاق المطلوب 0-100%
+            if ai_success_rate is None or ai_success_rate < 0:
+                ai_success_rate = 15  # حد أدنى
+            elif ai_success_rate > 100:
+                ai_success_rate = 95  # حد أقصى
+            
+            confidence = ai_success_rate
+            logger.info(f"[AI_SUCCESS] تم حساب نسبة النجاح للرمز {symbol}: {confidence:.1f}%")
+            
+        except Exception as e:
+            logger.error(f"[ERROR] فشل في حساب نسبة النجاح للرمز {symbol}: {e}")
+            # في حالة الفشل، حساب نسبة بديلة بناءً على المؤشرات المتوفرة - نفس منطق الرسالة الطويلة
+            backup_score = 50  # نقطة البداية
+            
+            try:
+                # حساب بديل بناءً على المؤشرات الأساسية
+                if indicators:
+                    rsi = indicators.get('rsi', 50)
+                    macd = indicators.get('macd', {})
+                    volume_ratio = indicators.get('volume_ratio', 1.0)
+                    
+                    # تعديل النسبة بناءً على RSI - نفس منطق الرسالة الطويلة
+                    if action == 'BUY':
+                        if rsi < 30:  # ذروة بيع - فرصة شراء
+                            backup_score += 20
+                        elif rsi > 70:  # ذروة شراء - خطر
+                            backup_score -= 15
+                    elif action == 'SELL':
+                        if rsi > 70:  # ذروة شراء - فرصة بيع
+                            backup_score += 20
+                        elif rsi < 30:  # ذروة بيع - خطر
+                            backup_score -= 15
+                    
+                    # تعديل بناءً على MACD - نفس منطق الرسالة الطويلة
+                    if macd.get('macd') is not None:
+                        macd_value = macd['macd']
+                        if (action == 'BUY' and macd_value > 0) or (action == 'SELL' and macd_value < 0):
+                            backup_score += 10
+                        else:
+                            backup_score -= 5
+                    
+                    # تعديل بناءً على الحجم - نفس منطق الرسالة الطويلة
+                    if volume_ratio > 1.5:
+                        backup_score += 10
+                    elif volume_ratio < 0.5:
+                        backup_score -= 10
+                    
+                    # ضمان النطاق 15-90%
+                    backup_score = max(0, min(100, backup_score))
+                
+                confidence = backup_score
+                logger.info(f"[BACKUP_SUCCESS] استخدام نسبة احتياطية للرمز {symbol}: {confidence:.1f}%")
+                
+            except Exception as backup_error:
+                logger.error(f"[ERROR] فشل في الحساب الاحتياطي للرمز {symbol}: {backup_error}")
+                confidence = 50  # نسبة افتراضية آمنة
+        
+        # استخدام نفس منطق حساب الأهداف من التحليل اليدوي - مطابق تماماً للرسالة الطويلة
+        trading_mode = get_user_trading_mode(user_id) if user_id else 'scalping'
+        capital = get_user_capital(user_id) if user_id else 1000
+        
+        # الحصول على الأهداف ووقف الخسارة من تحليل AI أو حسابها - نفس منطق الرسالة الطويلة
+        entry_price = analysis.get('entry_price') or analysis.get('entry') or current_price
+        target1 = analysis.get('target1') or analysis.get('tp1')
+        target2 = analysis.get('target2') or analysis.get('tp2')
+        stop_loss = analysis.get('stop_loss') or analysis.get('sl')
+        risk_reward_ratio = analysis.get('risk_reward')
+        
+        # التحقق من صحة القيم المستخرجة من AI وتطبيق قواعد نمط التداول - نفس منطق الرسالة الطويلة
+        ai_values_valid = True
+        if target1 and target2 and stop_loss and entry_price:
+            # التحقق من منطقية القيم
+            if trading_mode == 'scalping':
+                # للسكالبينغ: التأكد من أن الأهداف قريبة (1-3%) ووقف الخسارة ضيق (<1%)
+                if action == 'BUY':
+                    tp1_pct = abs((target1 - entry_price) / entry_price) * 100
+                    tp2_pct = abs((target2 - entry_price) / entry_price) * 100
+                    sl_pct = abs((entry_price - stop_loss) / entry_price) * 100
+                    
+                    if tp1_pct > 3 or tp2_pct > 5 or sl_pct > 1.5:
+                        logger.warning(f"[SCALPING_CHECK] قيم AI غير مناسبة للسكالبينغ للرمز {symbol}: TP1={tp1_pct:.1f}%, TP2={tp2_pct:.1f}%, SL={sl_pct:.1f}%")
+                        ai_values_valid = False
+                elif action == 'SELL':
+                    tp1_pct = abs((entry_price - target1) / entry_price) * 100
+                    tp2_pct = abs((entry_price - target2) / entry_price) * 100
+                    sl_pct = abs((stop_loss - entry_price) / entry_price) * 100
+                    
+                    if tp1_pct > 3 or tp2_pct > 5 or sl_pct > 1.5:
+                        logger.warning(f"[SCALPING_CHECK] قيم AI غير مناسبة للسكالبينغ للرمز {symbol}: TP1={tp1_pct:.1f}%, TP2={tp2_pct:.1f}%, SL={sl_pct:.1f}%")
+                        ai_values_valid = False
+                        
+                if ai_values_valid:
+                    logger.info(f"[AI_SUCCESS] استخدام قيم AI للسكالبينغ للرمز {symbol}: TP1={target1:.5f}, TP2={target2:.5f}, SL={stop_loss:.5f}")
+            else:
+                logger.info(f"[AI_SUCCESS] استخدام قيم AI للتداول طويل الأمد للرمز {symbol}: TP1={target1:.5f}, TP2={target2:.5f}, SL={stop_loss:.5f}")
+        else:
+            ai_values_valid = False
+            logger.debug(f"[AI_MISSING] قيم AI مفقودة للرمز {symbol}: TP1={target1}, TP2={target2}, SL={stop_loss}, Entry={entry_price}")
+        
+        # إذا لم تكن متوفرة من AI أو غير صالحة، احسبها من المؤشرات الفنية - نفس منطق الرسالة الطويلة
+        if not ai_values_valid or not all([target1, target2, stop_loss]):
+            # استخدام مستويات الدعم والمقاومة الحقيقية من MT5
+            resistance = indicators.get('resistance')
+            support = indicators.get('support')
+            
+            if resistance and support and resistance > support:
+                if action == 'BUY':
+                    # للشراء: الأهداف يجب أن تكون أعلى من السعر الحالي
+                    if resistance > current_price:
+                        target1 = target1 or min(resistance * 0.99, current_price * 1.02)
+                        target2 = target2 or min(resistance * 1.01, current_price * 1.04)
+                    else:
+                        # إذا كانت المقاومة أقل من السعر، استخدم نسبة من السعر الحالي
+                        target1 = target1 or current_price * 1.015
+                        target2 = target2 or current_price * 1.03
+                    stop_loss = stop_loss or max(support * 1.01, current_price * 0.985)
+                elif action == 'SELL':
+                    # للبيع: الأهداف يجب أن تكون أقل من السعر الحالي
+                    if support < current_price:
+                        target1 = target1 or max(support * 1.01, current_price * 0.98)
+                        target2 = target2 or max(support * 0.99, current_price * 0.96)
+                    else:
+                        # إذا كان الدعم أعلى من السعر، استخدم نسبة من السعر الحالي
+                        target1 = target1 or current_price * 0.985
+                        target2 = target2 or current_price * 0.97
+                    stop_loss = stop_loss or min(resistance * 0.99, current_price * 1.015)
+                else:  # HOLD
+                    target1 = target1 or current_price * 1.015
+                    target2 = target2 or current_price * 1.03
+                    stop_loss = stop_loss or current_price * 0.985
+            else:
+                # إذا لم تتوفر مستويات من MT5، احسب بناءً على ATR أو نسبة مئوية
+                atr = indicators.get('atr') if indicators else None
+                if atr and atr > 0:
+                    # استخدام ATR لحساب مستويات دقيقة
+                    if action == 'BUY':
+                        target1 = target1 or current_price + (atr * 1.5)
+                        target2 = target2 or current_price + (atr * 2.5)
+                        stop_loss = stop_loss or current_price - (atr * 1.0)
+                    elif action == 'SELL':
+                        target1 = target1 or current_price - (atr * 1.5)
+                        target2 = target2 or current_price - (atr * 2.5)
+                        stop_loss = stop_loss or current_price + (atr * 1.0)
+                    else:
+                        target1 = target1 or current_price + (atr * 1.0)
+                        target2 = target2 or current_price + (atr * 2.0)
+                        stop_loss = stop_loss or current_price - (atr * 1.0)
+                else:
+                    # نسب افتراضية حسب النمط - محسنة للسكالبينغ
+                    if trading_mode == 'scalping':
+                        # نسب دقيقة للسكالبينغ
+                        tp1_pct, tp2_pct, sl_pct = 0.015, 0.025, 0.005  # TP1: 1.5%, TP2: 2.5%, SL: 0.5%
+                        logger.info(f"[SCALPING] استخدام نسب السكالبينغ للرمز {symbol}: TP1={tp1_pct*100}%, TP2={tp2_pct*100}%, SL={sl_pct*100}%")
+                    else:
+                        # نسب للتداول طويل الأمد
+                        tp1_pct, tp2_pct, sl_pct = 0.05, 0.08, 0.02  # TP1: 5%, TP2: 8%, SL: 2%
+                        logger.info(f"[LONGTERM] استخدام نسب التداول طويل الأمد للرمز {symbol}: TP1={tp1_pct*100}%, TP2={tp2_pct*100}%, SL={sl_pct*100}%")
+                    
+                    if action == 'BUY':
+                        target1 = target1 or current_price * (1 + tp1_pct)
+                        target2 = target2 or current_price * (1 + tp2_pct)
+                        stop_loss = stop_loss or current_price * (1 - sl_pct)
+                    elif action == 'SELL':
+                        target1 = target1 or current_price * (1 - tp1_pct)
+                        target2 = target2 or current_price * (1 - tp2_pct)
+                        stop_loss = stop_loss or current_price * (1 + sl_pct)
+                    else:  # HOLD
+                        target1 = target1 or current_price * (1 + tp1_pct)
+                        target2 = target2 or current_price * (1 + tp2_pct)
+                        stop_loss = stop_loss or current_price * (1 - sl_pct)
+
+        # التحقق من منطقية القيم قبل المتابعة - نفس منطق الرسالة الطويلة
+        if current_price > 0:  # تأكد من أن السعر الحالي صحيح
+            if action == 'BUY':
+                # في صفقة الشراء: الأهداف يجب أن تكون أعلى من السعر والاستوب أقل
+                if target1 and target1 <= current_price:
+                    logger.debug(f"[LOGIC_FIX] {symbol}: تصحيح هدف 1 للشراء - من {target1:.5f} إلى {current_price * 1.015:.5f}")
+                    target1 = current_price * 1.015
+                if target2 and target2 <= current_price:
+                    logger.debug(f"[LOGIC_FIX] {symbol}: تصحيح هدف 2 للشراء - من {target2:.5f} إلى {current_price * 1.03:.5f}")
+                    target2 = current_price * 1.03
+                if stop_loss and stop_loss >= current_price:
+                    logger.debug(f"[LOGIC_FIX] {symbol}: تصحيح وقف الخسارة للشراء - من {stop_loss:.5f} إلى {current_price * 0.985:.5f}")
+                    stop_loss = current_price * 0.985
+            elif action == 'SELL':
+                # في صفقة البيع: الأهداف يجب أن تكون أقل من السعر والاستوب أعلى
+                if target1 and target1 >= current_price:
+                    logger.debug(f"[LOGIC_FIX] {symbol}: تصحيح هدف 1 للبيع - من {target1:.5f} إلى {current_price * 0.985:.5f}")
+                    target1 = current_price * 0.985
+                if target2 and target2 >= current_price:
+                    logger.debug(f"[LOGIC_FIX] {symbol}: تصحيح هدف 2 للبيع - من {target2:.5f} إلى {current_price * 0.97:.5f}")
+                    target2 = current_price * 0.97
+                if stop_loss and stop_loss <= current_price:
+                    logger.debug(f"[LOGIC_FIX] {symbol}: تصحيح وقف الخسارة للبيع - من {stop_loss:.5f} إلى {current_price * 1.015:.5f}")
+                    stop_loss = current_price * 1.015
+        else:
+            logger.error(f"[PRICE_ERROR] {symbol}: السعر الحالي غير صحيح ({current_price}) - لا يمكن حساب الأهداف")
+
+        # حساب النقاط بدقة مع ضمان قيم صحيحة - نفس منطق الرسالة الطويلة
+        def calc_points_for_symbol(price_diff, symbol_name):
+            """حساب النقاط حسب نوع الرمز بدقة محسنة"""
+            try:
+                if not price_diff or abs(price_diff) < 0.00001:
+                    return 0
+                
+                s = symbol_name.upper()
+                
+                # تحديد قيمة النقطة حسب نوع الأصل
+                if s.endswith('JPY'):
+                    # الين الياباني: النقطة = 0.01
+                    pip_size = 0.01
+                    base_points = abs(price_diff) / pip_size
+                elif s.startswith('XAU') or s.startswith('XAG') or 'GOLD' in s or 'SILVER' in s:
+                    # المعادن الثمينة: النقطة = 0.01
+                    pip_size = 0.01
+                    base_points = abs(price_diff) / pip_size
+                elif s.startswith('BTC') or s.startswith('ETH') or any(crypto in s for crypto in ['BTC', 'ETH', 'LTC', 'XRP']):
+                    # العملات الرقمية: النقطة = 1 (بسبب السعر المرتفع)
+                    pip_size = 1.0
+                    base_points = abs(price_diff) / pip_size
+                elif any(s.startswith(pair) for pair in ['EUR', 'GBP', 'AUD', 'NZD', 'USD', 'CAD', 'CHF']):
+                    # أزواج العملات الرئيسية: النقطة = 0.0001
+                    pip_size = 0.0001
+                    base_points = abs(price_diff) / pip_size
+                elif any(index in s for index in ['SPX', 'DXY', 'NASDAQ', 'DOW']):
+                    # المؤشرات: النقطة = 1
+                    pip_size = 1.0
+                    base_points = abs(price_diff) / pip_size
+                else:
+                    # افتراضي للأسهم والأصول الأخرى: النقطة = 0.01
+                    pip_size = 0.01
+                    base_points = abs(price_diff) / pip_size
+                
+                # تطبيق تعديل بناءً على رأس المال (تأثير أقل)
+                capital_multiplier = 1.0
+                if capital < 1000:
+                    capital_multiplier = 0.9
+                elif capital > 10000:
+                    capital_multiplier = 1.05
+                
+                final_points = base_points * capital_multiplier
+                
+                logger.debug(f"[POINTS_CALC] {symbol_name}: diff={price_diff:.5f}, pip_size={pip_size}, base_points={base_points:.1f}, final={final_points:.1f}")
+                
+                return max(0, round(final_points, 1))
+            except Exception as e:
+                logger.error(f"[ERROR] خطأ في حساب النقاط: {e}")
+                return 0
+        
+        # جلب حجم النقطة (pip size) الخاص بالرمز - نفس منطق الرسالة الطويلة
         asset_type, pip_size = get_asset_type_and_pip_size(symbol)
         
-        target_points = 0
+        # استخدام النقاط المحسوبة من AI إذا كانت متوفرة، وإلا حسابها يدوياً - نفس منطق الرسالة الطويلة
+        points1 = 0
+        points2 = 0
         stop_points = 0
         
-        if target1 and entry_price:
-            if action == 'BUY':
-                target_points = abs(target1 - entry_price) / pip_size
-            elif action == 'SELL':
-                target_points = abs(entry_price - target1) / pip_size
+        # إعطاء الأولوية للنقاط المحسوبة من AI
+        if analysis and analysis.get('ai_calculated'):
+            points1 = analysis.get('target1_points', 0) or 0
+            points2 = analysis.get('target2_points', 0) or 0  
+            stop_points = analysis.get('stop_points', 0) or 0
+            
+            # تطبيق حد أقصى معقول حسب نوع الرمز
+            if 'XAU' in symbol or 'GOLD' in symbol:  # للذهب
+                max_tp1, max_tp2, max_sl = 200, 300, 150
+            elif 'JPY' in symbol:  # الين الياباني
+                max_tp1, max_tp2, max_sl = 100, 150, 80
+            else:  # العملات العادية
+                max_tp1, max_tp2, max_sl = 100, 150, 80
+            
+            points1 = min(points1, max_tp1) if points1 else 0
+            points2 = min(points2, max_tp2) if points2 else 0
+            stop_points = min(stop_points, max_sl) if stop_points else 0
+            
+            logger.info(f"[AI_POINTS] استخدام النقاط المحسوبة من AI للرمز {symbol}: Target1={points1:.0f}, Target2={points2:.0f}, Stop={stop_points:.0f}")
         
-        if stop_loss and entry_price:
-            if action == 'BUY':
-                stop_points = abs(entry_price - stop_loss) / pip_size
-            elif action == 'SELL':
-                stop_points = abs(stop_loss - entry_price) / pip_size
+        # إذا لم تكن النقاط متوفرة من AI، احسبها من الأسعار الفعلية
+        if not (points1 or points2 or stop_points):
+            points1 = calc_points_for_symbol(target1 - entry_price if target1 else 0, symbol) if target1 else 0
+            points2 = calc_points_for_symbol(target2 - entry_price if target2 else 0, symbol) if target2 else 0
+            stop_points = calc_points_for_symbol(abs(entry_price - stop_loss) if stop_loss else 0, symbol) if stop_loss else 0
+        
+        # حساب نسبة المخاطرة/المكافأة - نفس منطق الرسالة الطويلة
+        if not risk_reward_ratio:
+            if stop_points > 0 and points1 > 0:
+                risk_reward_ratio = points1 / stop_points
+            else:
+                risk_reward_ratio = 1.0
         
         # تحديد نوع الصفقة
         trade_type = "شراء" if action == 'BUY' else "بيع" if action == 'SELL' else "انتظار"
         
-        # تحديد الفريم (افتراضي M15)
+        # تحديد الفريم (ثابت M15)
         timeframe = "M15"
         
-        # تحديد السبب (مبسط)
-        reason = "تقاطع EMA + كسر مقاومة" if action == 'BUY' else "تقاطع EMA + كسر دعم" if action == 'SELL' else "عدم وضوح الاتجاه"
+        # جلب تفسير AI مختصر للمؤشرات في الفريم 15 دقيقة
+        ai_explanation = ""
+        try:
+            # استخدام Gemini AI لتفسير سبب نسبة النجاح بناءً على مؤشرات الـ 15 دقيقة
+            technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
+            indicators = technical_data.get('indicators', {}) if technical_data else {}
+            
+            if indicators:
+                # تحضير بيانات المؤشرات للـ AI
+                rsi = indicators.get('rsi', 50)
+                macd = indicators.get('macd', {})
+                ma_20 = indicators.get('ma_20', 0)
+                ma_50 = indicators.get('ma_50', 0)
+                volume_ratio = indicators.get('volume_ratio', 1.0)
+                
+                # طلب تفسير مختصر من AI
+                prompt = f"""بناءً على مؤشرات الـ 15 دقيقة للرمز {symbol}:
+RSI: {rsi:.1f}, MACD: {macd.get('macd', 0):.4f}, MA20: {ma_20:.5f}, MA50: {ma_50:.5f}, Volume: {volume_ratio:.1f}x
+اكتب سطر أو سطرين مختصرين يفسران لماذا نسبة النجاح المتوقعة هي {confidence:.0f}% للصفقة {trade_type}."""
+                
+                # استخدام Gemini لتوليد التفسير
+                if gemini_analyzer.model:
+                    response = gemini_analyzer.model.generate_content(prompt)
+                    if response and response.text:
+                        ai_explanation = response.text.strip()
+                        # تحديد طول التفسير لسطرين كحد أقصى
+                        lines = ai_explanation.split('\n')
+                        if len(lines) > 2:
+                            ai_explanation = '\n'.join(lines[:2])
+        except Exception as e:
+            logger.warning(f"[AI_EXPLANATION] فشل في توليد تفسير AI للرمز {symbol}: {e}")
+            # تفسير ديناميكي بناءً على المؤشرات الفعلية (بدون قيم ثابتة)
+            try:
+                # جلب المؤشرات الفعلية لتوليد تفسير ديناميكي
+                technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
+                indicators = technical_data.get('indicators', {}) if technical_data else {}
+                
+                if indicators:
+                    rsi = indicators.get('rsi', 50)
+                    macd_data = indicators.get('macd', {})
+                    macd_value = macd_data.get('macd', 0) if macd_data else 0
+                    
+                    # تفسير ديناميكي بناءً على القيم الفعلية
+                    rsi_status = "منخفض" if rsi < 40 else "مرتفع" if rsi > 60 else "متوسط"
+                    macd_trend = "إيجابي" if macd_value > 0 else "سلبي" if macd_value < 0 else "محايد"
+                    
+                    if action == 'BUY':
+                        ai_explanation = f"RSI {rsi_status} ({rsi:.1f}) وMACD {macd_trend} يدعم الشراء بنسبة {confidence:.0f}%"
+                    elif action == 'SELL':
+                        ai_explanation = f"RSI {rsi_status} ({rsi:.1f}) وMACD {macd_trend} يدعم البيع بنسبة {confidence:.0f}%"
+                    else:
+                        ai_explanation = f"RSI {rsi_status} ({rsi:.1f}) وMACD {macd_trend} يستدعي الانتظار بنسبة {confidence:.0f}%"
+                else:
+                    # إذا لم تتوفر مؤشرات، استخدم معلومات من التحليل نفسه
+                    ai_explanation = f"تحليل المؤشرات يشير لنسبة نجاح {confidence:.0f}% للصفقة {trade_type}"
+            except Exception as fallback_error:
+                logger.error(f"[AI_FALLBACK] فشل في التفسير الاحتياطي للرمز {symbol}: {fallback_error}")
+                # آخر حل: تفسير بسيط جداً بناءً على البيانات المتوفرة
+                ai_explanation = f"تحليل فني يشير لنسبة نجاح {confidence:.0f}% للاتجاه {trade_type}"
         
+        # تنسيق الرسالة المختصرة حسب التصميم المطلوب (ديناميكية 100%)
         message = f"""📊 **صفقة مقترحة**
 
 **الزوج:** {symbol}
 **نوع الصفقة:** {trade_type}
 **سعر الدخول:** {entry_price:.5f}
-**الهدف:** ({target_points:.0f} نقطة)
+**الهدف:** ({points1:.0f} نقطة)
 **وقف الخسارة:** (-{stop_points:.0f} نقطة)
 
 ⏰ **الفريم:** {timeframe}
-📈 **نسبة النجاح المتوقعة:** {confidence:.0f}%
-💡 **السبب:** {reason}"""
+📈 **نسبة النجاح المتوقعة:** {confidence:.0f}%"""
+        
+        # إضافة تفسير AI المختصر للتقاطعات في الفريم M15
+        if ai_explanation:
+            message += f"\n💡 **السبب:** {ai_explanation}"
         
         return message
         
@@ -1967,9 +2414,73 @@ def handle_switch_hz_command(message):
 • 150 ثانية ⏰: مراقبة متوسطة وموفرة للموارد
 
 ⚠️ **ملاحظة:** التغيير سيؤثر على جميع دورات المراقبة القادمة
+
+سيتم إشعار جميع المستخدمين بالتغيير...
         """
         
         bot.reply_to(message, response_message.strip(), parse_mode='Markdown')
+        
+        # إشعار جميع المستخدمين النشطين بتغيير التردد
+        try:
+            # جلب قائمة المستخدمين النشطين من user_sessions
+            active_users = []
+            for user_id_key, session in user_sessions.items():
+                if session.get('authenticated', False):
+                    active_users.append(user_id_key)
+            
+            user_notification_message = f"""
+🔄 **تحديث تردد المراقبة**
+
+تم تغيير تردد مراقبة السوق إلى **{new_frequency_text}**
+
+📊 **التأثير على إشعاراتك:**
+• {frequency_description}
+• {'إشعارات أكثر تكراراً وسرعة' if MONITORING_FREQUENCY == 30 else 'إشعارات أقل تكراراً وأكثر دقة'}
+
+🤖 **بوت التداول v1.2.0**
+            """
+            
+            sent_count = 0
+            failed_count = 0
+            
+            for user_id_to_notify in active_users:
+                try:
+                    bot.send_message(
+                        chat_id=user_id_to_notify,
+                        text=user_notification_message,
+                        parse_mode='Markdown'
+                    )
+                    sent_count += 1
+                except Exception as send_error:
+                    logger.error(f"[HZ_SWITCH] فشل إرسال إشعار تغيير التردد للمستخدم {user_id_to_notify}: {send_error}")
+                    failed_count += 1
+            
+            # تقرير للمطور
+            report_message = f"""
+📊 **تقرير إشعار تغيير التردد**
+
+✅ تم الإرسال: {sent_count} مستخدم
+❌ فشل الإرسال: {failed_count} مستخدم
+📊 إجمالي المستخدمين: {len(active_users)}
+🔄 التردد الجديد: {MONITORING_FREQUENCY} ثانية
+            """
+            
+            bot.send_message(
+                chat_id=DEVELOPER_ID,
+                text=report_message,
+                parse_mode='Markdown'
+            )
+            
+            logger.info(f"[HZ_SWITCH] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية وإشعار {sent_count} مستخدم")
+            
+        except Exception as notification_error:
+            logger.error(f"[HZ_SWITCH] خطأ في إرسال إشعارات تغيير التردد: {notification_error}")
+            bot.send_message(
+                chat_id=DEVELOPER_ID,
+                text=f"❌ فشل في إرسال إشعارات تغيير التردد: {str(notification_error)}",
+                parse_mode='Markdown'
+            )
+        
         logger.info(f"[SWITCH_HZ] تم تغيير تردد المراقبة إلى {MONITORING_FREQUENCY} ثانية بواسطة المطور")
         
     except Exception as e:
@@ -7191,6 +7702,34 @@ class GeminiAnalyzer:
         
         return {}
     
+    def _consolidate_multi_tf_indicators_for_background_analysis(self, multi_tf_indicators: Dict) -> Dict:
+        """دمج المؤشرات متعددة الإطارات للتحليل الخلفي مع التركيز على M15"""
+        try:
+            if not multi_tf_indicators:
+                return {}
+            
+            # استخدام M15 كأساس (حسب طلب المستخدم)
+            base_indicators = multi_tf_indicators.get('M15', {}).get('indicators', {})
+            
+            # إضافة معلومات من الإطارات الأخرى لتعزيز التحليل
+            consolidated = base_indicators.copy()
+            
+            # إضافة اتجاهات من الإطارات الأخرى لتعزيز دقة التحليل
+            for tf in ['M5', 'M30', 'M60']:
+                if tf in multi_tf_indicators:
+                    tf_data = multi_tf_indicators[tf].get('indicators', {})
+                    # إضافة معلومات الاتجاه من الإطارات الأخرى
+                    consolidated[f'{tf.lower()}_trend'] = tf_data.get('trend', 'محايد')
+                    consolidated[f'{tf.lower()}_rsi'] = tf_data.get('rsi', 50)
+            
+            logger.debug(f"[CONSOLIDATE] تم دمج مؤشرات متعددة الإطارات مع التركيز على M15")
+            return consolidated
+            
+        except Exception as e:
+            logger.error(f"[CONSOLIDATE_ERROR] خطأ في دمج المؤشرات متعددة الإطارات: {e}")
+            # إرجاع M15 فقط في حالة الخطأ
+            return multi_tf_indicators.get('M15', {}).get('indicators', {}) if multi_tf_indicators else {}
+    
     def _build_enhanced_background_prompt(self, symbol: str, current_price: float, bid: float, ask: float, 
                                         spread: float, indicators: Dict, trading_mode: str, capital: float, timezone_str: str) -> str:
         """بناء prompt للتحليل الخلفي المحسن باستخدام جميع البيانات من التحليل اليدوي"""
@@ -8960,14 +9499,21 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
                 logger.error(f"[ERROR] فشل في إرسال الإشعار البسيط: {send_error}")
             return  # إنهاء الدالة مبكراً في حالة الخطأ
         
-        # استخدام النوع المناسب من الإشعارات حسب الإعداد العام
+        # نظام موحد: بناء الرسالة الطويلة أولاً ثم اختيار النسخة حسب الإعداد
         global SHORT_NOTIFICATIONS
+        
+        # بناء الرسالة الطويلة أولاً (لا تغيير في النظام الأصلي)
+        long_message = format_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
+        
+        # اختيار نوع الرسالة بناءً على إعداد SHORT_NOTIFICATIONS فقط
         if SHORT_NOTIFICATIONS:
-            # استخدام الإشعارات القصيرة جداً
-            message = format_very_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
+            # استخراج النسخة المختصرة من نفس البيانات المحسوبة في الرسالة الطويلة
+            message = extract_short_message_from_long(long_message, symbol, symbol_info, price_data, fresh_analysis, user_id)
+            logger.debug(f"[SHORT_MODE] تم اختيار الرسالة المختصرة للرمز {symbol} حسب إعداد المطور")
         else:
-            # استخدام الإشعارات المختصرة العادية
-            message = format_short_alert_message(symbol, symbol_info, price_data, fresh_analysis, user_id)
+            # استخدام الرسالة الطويلة كما هي
+            message = long_message
+            logger.debug(f"[LONG_MODE] تم اختيار الرسالة الطويلة للرمز {symbol} حسب إعداد المطور")
         
         # إنشاء أزرار التقييم
         markup = create_feedback_buttons(trade_id) if trade_id else None
