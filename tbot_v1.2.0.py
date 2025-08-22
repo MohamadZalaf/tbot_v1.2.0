@@ -7588,9 +7588,14 @@ class GeminiAnalyzer:
             try:
                 logger.info(f"[AUTO_AI_INDICATORS] جلب المؤشرات متعددة الإطارات للتحليل الآلي للرمز {symbol}")
                 multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
-                # استخدام المؤشرات الجديدة في التحليل الخلفي
-                indicators = self._consolidate_multi_tf_indicators_for_background_analysis(multi_tf_indicators)
-                logger.info(f"[AUTO_AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للتحليل الخلفي للرمز {symbol}")
+                # استخدام المؤشرات من الفريم M15 كأساس (حسب طلب المستخدم)
+                if multi_tf_indicators and 'M15' in multi_tf_indicators:
+                    indicators = multi_tf_indicators['M15'].get('indicators', {})
+                    logger.info(f"[AUTO_AI_INDICATORS] تم استخدام مؤشرات M15 للتحليل الخلفي للرمز {symbol}")
+                else:
+                    # fallback للمؤشرات القديمة
+                    indicators = technical_data.get('indicators', {}) if technical_data else {}
+                    logger.warning(f"[AUTO_AI_INDICATORS] استخدام المؤشرات الافتراضية للرمز {symbol}")
             except Exception as indicators_error:
                 logger.error(f"[AUTO_AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
                 # fallback للمؤشرات القديمة
