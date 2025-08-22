@@ -674,7 +674,30 @@ class TradingBotUI:
         )
         log_label.pack(anchor=tk.W)
         
-        # Log text area
+        # Log text area with save button
+        log_controls_frame = tk.Frame(log_frame, bg='#2b2b2b')
+        log_controls_frame.pack(fill=tk.X, pady=5)
+        
+        save_logs_button = tk.Button(
+            log_controls_frame,
+            text="💾 حفظ السجل كملف TXT",
+            font=("Arial", 10, "bold"),
+            bg='#FF9800',
+            fg='white',
+            command=self.save_logs_to_file
+        )
+        save_logs_button.pack(side=tk.RIGHT, padx=5)
+        
+        clear_logs_button = tk.Button(
+            log_controls_frame,
+            text="🧹 مسح السجل",
+            font=("Arial", 10, "bold"),
+            bg='#f44336',
+            fg='white',
+            command=self.clear_logs
+        )
+        clear_logs_button.pack(side=tk.RIGHT, padx=5)
+        
         self.log_text = scrolledtext.ScrolledText(
             log_frame,
             height=15,
@@ -685,6 +708,35 @@ class TradingBotUI:
             wrap=tk.WORD
         )
         self.log_text.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Bottom frame for uptime counter
+        bottom_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
+        bottom_frame.pack(fill=tk.X, pady=5)
+        
+        # Uptime counters (bottom left)
+        self.uptime_label = tk.Label(
+            bottom_frame,
+            text="⏱️ وقت تشغيل الواجهة: 00:00:00",
+            font=("Arial", 10),
+            fg='#cccccc',
+            bg='#2b2b2b'
+        )
+        self.uptime_label.pack(side=tk.LEFT, padx=5)
+        
+        self.bot_uptime_label = tk.Label(
+            bottom_frame,
+            text="🤖 وقت تشغيل البوت: متوقف",
+            font=("Arial", 10),
+            fg='#cccccc',
+            bg='#2b2b2b'
+        )
+        self.bot_uptime_label.pack(side=tk.LEFT, padx=15)
+        
+        # Initialize uptime tracking
+        self.start_time = datetime.now()
+        self.bot_start_time = None  # Will be set when bot starts
+        self.update_uptime()
+        self.update_bot_uptime()
         
         # Add initial log messages
         self.add_log("🔧 تم تهيئة واجهة التحكم في البوت - إصدار مدمج كامل")
@@ -969,6 +1021,81 @@ class TradingBotUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
+        # Telegram API Section
+        telegram_frame = tk.LabelFrame(
+            scrollable_frame,
+            text="📱 إدارة رمز Telegram Bot API",
+            font=("Arial", 12, "bold"),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        telegram_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Current token display
+        token_label = tk.Label(
+            telegram_frame,
+            text="رمز البوت الحالي:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        token_label.grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.telegram_token_entry = tk.Entry(
+            telegram_frame,
+            font=("Arial", 10),
+            width=50,
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        self.telegram_token_entry.grid(row=0, column=1, padx=5, pady=5)
+        
+        # Bot password
+        bot_password_label = tk.Label(
+            telegram_frame,
+            text="كلمة مرور البوت:",
+            font=("Arial", 10),
+            fg='#ffffff',
+            bg='#2b2b2b'
+        )
+        bot_password_label.grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.bot_password_entry = tk.Entry(
+            telegram_frame,
+            font=("Arial", 10),
+            width=50,
+            bg='#1a1a1a',
+            fg='#ffffff'
+        )
+        self.bot_password_entry.grid(row=1, column=1, padx=5, pady=5)
+        
+        # Load current telegram settings
+        self.load_telegram_settings()
+        
+        # Telegram save button
+        telegram_save_frame = tk.Frame(telegram_frame, bg='#2b2b2b')
+        telegram_save_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        
+        save_telegram_button = tk.Button(
+            telegram_save_frame,
+            text="💾 حفظ إعدادات Telegram",
+            font=("Arial", 10, "bold"),
+            bg='#4CAF50',
+            fg='white',
+            command=self.save_telegram_settings
+        )
+        save_telegram_button.pack(side=tk.LEFT, padx=5)
+        
+        test_telegram_button = tk.Button(
+            telegram_save_frame,
+            text="🔗 اختبار الرمز",
+            font=("Arial", 10, "bold"),
+            bg='#2196F3',
+            fg='white',
+            command=self.test_telegram_token
+        )
+        test_telegram_button.pack(side=tk.LEFT, padx=5)
+        
         # Gemini API Section
         gemini_frame = tk.LabelFrame(
             scrollable_frame,
@@ -1054,6 +1181,20 @@ class TradingBotUI:
             command=self.check_api_keys_status
         )
         check_keys_button.pack(side=tk.LEFT, padx=2)
+        
+        # Gemini save button
+        gemini_save_frame = tk.Frame(gemini_frame, bg='#2b2b2b')
+        gemini_save_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        save_gemini_button = tk.Button(
+            gemini_save_frame,
+            text="💾 حفظ إعدادات Gemini",
+            font=("Arial", 10, "bold"),
+            bg='#4CAF50',
+            fg='white',
+            command=self.save_gemini_settings
+        )
+        save_gemini_button.pack(side=tk.LEFT, padx=5)
         
         # MT5 Login Section
         mt5_frame = tk.LabelFrame(
@@ -1497,6 +1638,189 @@ class TradingBotUI:
         except Exception as e:
             messagebox.showerror("خطأ", f"خطأ في اختبار الاتصال: {str(e)}")
     
+    def load_telegram_settings(self):
+        """Load Telegram settings into fields"""
+        try:
+            self.telegram_token_entry.delete(0, tk.END)
+            self.bot_password_entry.delete(0, tk.END)
+            
+            if EMBEDDED_CONFIG.get('BOT_TOKEN'):
+                self.telegram_token_entry.insert(0, EMBEDDED_CONFIG['BOT_TOKEN'])
+            if EMBEDDED_CONFIG.get('BOT_PASSWORD'):
+                self.bot_password_entry.insert(0, EMBEDDED_CONFIG['BOT_PASSWORD'])
+                
+        except Exception as e:
+            self.add_log(f"خطأ في تحميل إعدادات Telegram: {str(e)}")
+    
+    def save_telegram_settings(self):
+        """Save Telegram settings"""
+        try:
+            EMBEDDED_CONFIG['BOT_TOKEN'] = self.telegram_token_entry.get().strip()
+            EMBEDDED_CONFIG['BOT_PASSWORD'] = self.bot_password_entry.get().strip()
+            
+            self.save_config()
+            messagebox.showinfo("نجح", "تم حفظ إعدادات Telegram بنجاح")
+            self.add_log("💾 تم حفظ إعدادات Telegram")
+            
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في حفظ إعدادات Telegram: {str(e)}")
+    
+    def test_telegram_token(self):
+        """Test Telegram bot token"""
+        try:
+            token = self.telegram_token_entry.get().strip()
+            if not token:
+                messagebox.showwarning("تحذير", "يرجى إدخال رمز البوت أولاً")
+                return
+            
+            # Show progress
+            progress_window = tk.Toplevel(self.settings_window)
+            progress_window.title("اختبار رمز البوت")
+            progress_window.geometry("400x150")
+            progress_window.configure(bg='#2b2b2b')
+            progress_window.transient(self.settings_window)
+            progress_window.grab_set()
+            
+            progress_label = tk.Label(
+                progress_window,
+                text="🔗 جاري اختبار رمز Telegram Bot...",
+                font=("Arial", 12),
+                fg='#ffffff',
+                bg='#2b2b2b'
+            )
+            progress_label.pack(expand=True)
+            
+            progress_window.update()
+            
+            # Test the token
+            try:
+                test_bot = telebot.TeleBot(token)
+                bot_info = test_bot.get_me()
+                
+                progress_window.destroy()
+                messagebox.showinfo(
+                    "نتيجة الاختبار",
+                    f"✅ رمز البوت صحيح!\n\n"
+                    f"اسم البوت: {bot_info.first_name}\n"
+                    f"معرف البوت: @{bot_info.username}\n"
+                    f"ID: {bot_info.id}"
+                )
+                self.add_log("🔗 تم اختبار رمز Telegram بنجاح")
+                
+            except Exception as token_error:
+                progress_window.destroy()
+                messagebox.showerror("فشل الاختبار", f"❌ رمز البوت غير صحيح:\n{str(token_error)}")
+                
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في اختبار الرمز: {str(e)}")
+    
+    def save_gemini_settings(self):
+        """Save Gemini API settings"""
+        try:
+            self.save_config()
+            messagebox.showinfo("نجح", "تم حفظ إعدادات Gemini API بنجاح")
+            self.add_log("💾 تم حفظ إعدادات Gemini API")
+            
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في حفظ إعدادات Gemini: {str(e)}")
+    
+    def save_logs_to_file(self):
+        """Save logs to a text file"""
+        try:
+            from tkinter import filedialog
+            
+            # Ask for save location
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+                title="حفظ سجل الأحداث",
+                initialvalue=f"bot_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            )
+            
+            if filename:
+                logs_content = self.log_text.get("1.0", tk.END)
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(f"🤖 سجل أحداث بوت التداول v1.2.0\n")
+                    f.write(f"تاريخ الحفظ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write("=" * 50 + "\n\n")
+                    f.write(logs_content)
+                
+                messagebox.showinfo("نجح", f"تم حفظ السجل في:\n{filename}")
+                self.add_log(f"💾 تم حفظ السجل في ملف: {os.path.basename(filename)}")
+                
+        except Exception as e:
+            messagebox.showerror("خطأ", f"فشل في حفظ السجل: {str(e)}")
+    
+    def clear_logs(self):
+        """Clear the logs display"""
+        try:
+            result = messagebox.askyesno(
+                "تأكيد المسح",
+                "هل أنت متأكد من مسح جميع السجلات؟\n\n(سيتم الاحتفاظ بالسجلات في ملف bot.log)"
+            )
+            
+            if result:
+                self.log_text.delete("1.0", tk.END)
+                self.add_log("🧹 تم مسح عرض السجل (الملفات محفوظة)")
+                
+        except Exception as e:
+            messagebox.showerror("خطأ", f"خطأ في مسح السجل: {str(e)}")
+    
+    def update_uptime(self):
+        """Update uptime counter"""
+        try:
+            if hasattr(self, 'start_time') and hasattr(self, 'uptime_label'):
+                current_time = datetime.now()
+                uptime = current_time - self.start_time
+                
+                # Format uptime as HH:MM:SS
+                total_seconds = int(uptime.total_seconds())
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                seconds = total_seconds % 60
+                
+                uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                self.uptime_label.config(text=f"⏱️ وقت تشغيل الواجهة: {uptime_str}")
+                
+                # Schedule next update
+                self.root.after(1000, self.update_uptime)
+                
+        except Exception as e:
+            # Silent error handling for uptime
+            pass
+    
+    def update_bot_uptime(self):
+        """Update bot uptime counter"""
+        try:
+            if hasattr(self, 'bot_start_time') and hasattr(self, 'bot_uptime_label'):
+                if self.bot_start_time and self.embedded_bot.is_running:
+                    current_time = datetime.now()
+                    bot_uptime = current_time - self.bot_start_time
+                    
+                    # Format uptime as HH:MM:SS
+                    total_seconds = int(bot_uptime.total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    seconds = total_seconds % 60
+                    
+                    bot_uptime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    self.bot_uptime_label.config(
+                        text=f"🤖 وقت تشغيل البوت: {bot_uptime_str}",
+                        fg='#00ff00'
+                    )
+                else:
+                    self.bot_uptime_label.config(
+                        text="🤖 وقت تشغيل البوت: متوقف",
+                        fg='#ff6666'
+                    )
+                
+                # Schedule next update
+                self.root.after(1000, self.update_bot_uptime)
+                
+        except Exception as e:
+            # Silent error handling for bot uptime
+            pass
+    
     def save_config(self):
         """Save configuration to file"""
         try:
@@ -1562,6 +1886,10 @@ class TradingBotUI:
             self.start_button.config(state='disabled')
             self.stop_button.config(state='normal')
             self.add_log(f"✅ {message}")
+            
+            # Reset start time for uptime counter
+            self.bot_start_time = datetime.now()
+            self.update_bot_uptime()
         else:
             self.add_log(f"❌ {message}")
             messagebox.showerror("خطأ", message)
@@ -1580,6 +1908,9 @@ class TradingBotUI:
             self.start_button.config(state='normal')
             self.stop_button.config(state='disabled')
             self.add_log(f"✅ {message}")
+            
+            # Reset bot start time
+            self.bot_start_time = None
         else:
             self.add_log(f"❌ {message}")
             messagebox.showerror("خطأ", message)
