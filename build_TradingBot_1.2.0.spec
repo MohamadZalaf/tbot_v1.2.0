@@ -27,7 +27,7 @@ a = Analysis(
     datas=[
         ('config.py', '.'),
         ('tbot_v1.2.0.py', '.'),
-        ('icon.ico', '.') if os.path.exists('icon.ico') else None,
+        ('icon.ico', '.'),
     ],
     hiddenimports=[
         'telebot',

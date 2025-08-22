@@ -33,30 +33,63 @@ import glob
 import io
 
 # ===============================================
-# EMBEDDED RESOURCES (BASE64 ENCODED)
+# EXTERNAL CONFIG LOADING
 # ===============================================
 
-# Embedded config data
-EMBEDDED_CONFIG = {
-    'BOT_TOKEN': '7703327028:AAHLqgR1HtVPsq6LfUKEWzNEgLZjJPLa6YU',
-    'BOT_PASSWORD': 'tra12345678',
-    'GEMINI_API_KEYS': ['AIzaSyDAOp1ARgrkUvPcmGmXddFx8cqkzhy-3O8'],
-    'MT5_LOGIN': None,
-    'MT5_PASSWORD': None,
-    'MT5_SERVER': None,
-    'MONITORING_INTERVAL': 30,
-    'MIN_CONFIDENCE_THRESHOLD': 70,
-    'MAX_DAILY_ALERTS': 50,
-    'GEMINI_MODEL': 'gemini-2.0-flash',
-    'GEMINI_GENERATION_CONFIG': {
-        'temperature': 0.7,
-        'top_p': 0.8,
-        'top_k': 40,
-        'max_output_tokens': 1024,
-    },
-    'GEMINI_SAFETY_SETTINGS': [],
-    'DEFAULT_CAPITAL_OPTIONS': [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000]
-}
+def load_external_config():
+    """Load configuration from external config.py file"""
+    try:
+        # Try to import external config
+        if os.path.exists('config.py'):
+            sys.path.insert(0, os.getcwd())
+            import config
+            return {
+                'BOT_TOKEN': getattr(config, 'BOT_TOKEN', ''),
+                'BOT_PASSWORD': getattr(config, 'BOT_PASSWORD', 'tra12345678'),
+                'GEMINI_API_KEYS': getattr(config, 'GEMINI_API_KEYS', []),
+                'MT5_LOGIN': getattr(config, 'MT5_LOGIN', None),
+                'MT5_PASSWORD': getattr(config, 'MT5_PASSWORD', None),
+                'MT5_SERVER': getattr(config, 'MT5_SERVER', None),
+                'MONITORING_INTERVAL': getattr(config, 'MONITORING_INTERVAL', 30),
+                'MIN_CONFIDENCE_THRESHOLD': getattr(config, 'MIN_CONFIDENCE_THRESHOLD', 70),
+                'MAX_DAILY_ALERTS': getattr(config, 'MAX_DAILY_ALERTS', 50),
+                'GEMINI_MODEL': getattr(config, 'GEMINI_MODEL', 'gemini-2.0-flash'),
+                'GEMINI_GENERATION_CONFIG': getattr(config, 'GEMINI_GENERATION_CONFIG', {
+                    'temperature': 0.7,
+                    'top_p': 0.8,
+                    'top_k': 40,
+                    'max_output_tokens': 1024,
+                }),
+                'GEMINI_SAFETY_SETTINGS': getattr(config, 'GEMINI_SAFETY_SETTINGS', []),
+                'DEFAULT_CAPITAL_OPTIONS': getattr(config, 'DEFAULT_CAPITAL_OPTIONS', [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000])
+            }
+    except Exception as e:
+        print(f"⚠️ خطأ في تحميل config.py: {e}")
+        
+    # Fallback to embedded config
+    return {
+        'BOT_TOKEN': '7703327028:AAHLqgR1HtVPsq6LfUKEWzNEgLZjJPLa6YU',
+        'BOT_PASSWORD': 'tra12345678',
+        'GEMINI_API_KEYS': ['AIzaSyDAOp1ARgrkUvPcmGmXddFx8cqkzhy-3O8'],
+        'MT5_LOGIN': None,
+        'MT5_PASSWORD': None,
+        'MT5_SERVER': None,
+        'MONITORING_INTERVAL': 30,
+        'MIN_CONFIDENCE_THRESHOLD': 70,
+        'MAX_DAILY_ALERTS': 50,
+        'GEMINI_MODEL': 'gemini-2.0-flash',
+        'GEMINI_GENERATION_CONFIG': {
+            'temperature': 0.7,
+            'top_p': 0.8,
+            'top_k': 40,
+            'max_output_tokens': 1024,
+        },
+        'GEMINI_SAFETY_SETTINGS': [],
+        'DEFAULT_CAPITAL_OPTIONS': [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000]
+    }
+
+# Load configuration from external file
+EMBEDDED_CONFIG = load_external_config()
 
 # Simple embedded icon (bot icon as base64)
 EMBEDDED_ICON = """
@@ -449,6 +482,8 @@ class TradingBotUI:
         self.is_monitoring = False
         self.users_count_window = None
         self.settings_window = None
+        self.bot_process = None
+        self.bot_output_thread = None
         
         # Initialize main window
         self.setup_main_window()
@@ -465,7 +500,7 @@ class TradingBotUI:
         """Setup main application window"""
         self.root = tk.Tk()
         self.root.title("🤖 بوت التداول المتقدم v1.2.0 - واجهة التحكم")
-        self.root.geometry("1000x750")
+        self.root.geometry("850x750")
         self.root.resizable(False, False)
         
         # Set embedded icon
@@ -2113,7 +2148,9 @@ class TradingBotUI:
         """Update bot uptime counter"""
         try:
             if hasattr(self, 'bot_start_time') and hasattr(self, 'bot_uptime_label'):
-                if self.bot_start_time and self.embedded_bot.is_running:
+                # Check if external bot is running
+                bot_running = hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None
+                if self.bot_start_time and bot_running:
                     current_time = datetime.now()
                     bot_uptime = current_time - self.bot_start_time
                     
@@ -2416,12 +2453,70 @@ class TradingBotUI:
             messagebox.showerror("خطأ", f"خطأ في عرض نافذة حول: {str(e)}")
      
     def save_config(self):
-        """Save configuration to file"""
+        """Save configuration to external config.py file"""
         try:
-            # Save to a config file
-            config_file = os.path.join(DATA_DIR, "gui_config.json")
-            with open(config_file, 'w', encoding='utf-8') as f:
-                json.dump(EMBEDDED_CONFIG, f, ensure_ascii=False, indent=2)
+            # Save to external config.py file
+            if os.path.exists('config.py'):
+                # Read current config.py content
+                with open('config.py', 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Update specific values
+                import re
+                
+                # Update BOT_TOKEN
+                if 'BOT_TOKEN' in EMBEDDED_CONFIG and EMBEDDED_CONFIG['BOT_TOKEN']:
+                    content = re.sub(
+                        r"BOT_TOKEN\s*=\s*['\"][^'\"]*['\"]",
+                        f"BOT_TOKEN = '{EMBEDDED_CONFIG['BOT_TOKEN']}'",
+                        content
+                    )
+                
+                # Update BOT_PASSWORD
+                if 'BOT_PASSWORD' in EMBEDDED_CONFIG and EMBEDDED_CONFIG['BOT_PASSWORD']:
+                    content = re.sub(
+                        r"BOT_PASSWORD\s*=\s*['\"][^'\"]*['\"]",
+                        f"BOT_PASSWORD = '{EMBEDDED_CONFIG['BOT_PASSWORD']}'",
+                        content
+                    )
+                
+                # Update GEMINI_API_KEY
+                if 'GEMINI_API_KEYS' in EMBEDDED_CONFIG and EMBEDDED_CONFIG['GEMINI_API_KEYS']:
+                    api_key = EMBEDDED_CONFIG['GEMINI_API_KEYS'][0] if EMBEDDED_CONFIG['GEMINI_API_KEYS'] else ''
+                    content = re.sub(
+                        r"GEMINI_API_KEY\s*=\s*['\"][^'\"]*['\"]",
+                        f"GEMINI_API_KEY = '{api_key}'",
+                        content
+                    )
+                
+                # Update MT5 settings
+                for key in ['MT5_LOGIN', 'MT5_PASSWORD', 'MT5_SERVER']:
+                    if key in EMBEDDED_CONFIG:
+                        value = EMBEDDED_CONFIG[key]
+                        if value is None:
+                            content = re.sub(
+                                f"{key}\\s*=\\s*[^\\n]*",
+                                f"{key} = None",
+                                content
+                            )
+                        else:
+                            content = re.sub(
+                                f"{key}\\s*=\\s*[^\\n]*",
+                                f"{key} = '{value}'" if isinstance(value, str) else f"{key} = {value}",
+                                content
+                            )
+                
+                # Write updated content back
+                with open('config.py', 'w', encoding='utf-8') as f:
+                    f.write(content)
+                    
+                self.add_log("💾 تم حفظ الإعدادات في config.py")
+            else:
+                # Fallback to JSON if config.py doesn't exist
+                config_file = os.path.join(DATA_DIR, "gui_config.json")
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(EMBEDDED_CONFIG, f, ensure_ascii=False, indent=2)
+                self.add_log("💾 تم حفظ الإعدادات في gui_config.json")
             
             # Update embedded bot config
             self.embedded_bot.config = EMBEDDED_CONFIG
@@ -2467,47 +2562,120 @@ class TradingBotUI:
             self.settings_window.destroy()
     
     def start_bot(self):
-        """Start the embedded bot"""
+        """Start the external bot file tbot_v1.2.0.py"""
         if not self.is_logged_in:
             messagebox.showerror("رفض الوصول", "يرجى تسجيل الدخول أولاً!")
             return
         
-        self.add_log("🚀 جاري تشغيل بوت التداول المدمج...")
-        success, message = self.embedded_bot.start_bot()
+        # Check if bot file exists
+        bot_file = "tbot_v1.2.0.py"
+        if not os.path.exists(bot_file):
+            self.add_log("❌ ملف البوت غير موجود: tbot_v1.2.0.py")
+            messagebox.showerror("خطأ", "ملف البوت غير موجود: tbot_v1.2.0.py")
+            return
         
-        if success:
+        # Check if bot is already running
+        if hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None:
+            self.add_log("⚠️ البوت يعمل بالفعل")
+            return
+        
+        try:
+            self.add_log("🚀 جاري تشغيل بوت التداول الخارجي...")
+            
+            # Start external bot process
+            self.bot_process = subprocess.Popen(
+                [sys.executable, bot_file],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1,
+                cwd=os.getcwd()
+            )
+            
+            # Start thread to read bot output
+            self.bot_output_thread = threading.Thread(target=self._read_bot_output, daemon=True)
+            self.bot_output_thread.start()
+            
             self.status_indicator.config(text="🟢 يعمل", fg='#00ff00')
             self.start_button.config(state='disabled')
             self.stop_button.config(state='normal')
-            self.add_log(f"✅ {message}")
+            self.add_log("✅ تم تشغيل البوت الخارجي بنجاح")
             
             # Reset start time for uptime counter
             self.bot_start_time = datetime.now()
             self.update_bot_uptime()
-        else:
-            self.add_log(f"❌ {message}")
-            messagebox.showerror("خطأ", message)
+            
+        except Exception as e:
+            self.add_log(f"❌ خطأ في تشغيل البوت: {str(e)}")
+            messagebox.showerror("خطأ", f"خطأ في تشغيل البوت: {str(e)}")
     
     def stop_bot(self):
-        """Stop the embedded bot"""
+        """Stop the external bot process"""
         if not self.is_logged_in:
             messagebox.showerror("رفض الوصول", "يرجى تسجيل الدخول أولاً!")
             return
         
-        self.add_log("🛑 جاري إيقاف بوت التداول المدمج...")
-        success, message = self.embedded_bot.stop_bot()
-        
-        if success:
-            self.status_indicator.config(text="⚫ متوقف", fg='#ff6666')
-            self.start_button.config(state='normal')
-            self.stop_button.config(state='disabled')
-            self.add_log(f"✅ {message}")
+        try:
+            if hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None:
+                self.add_log("🛑 جاري إيقاف بوت التداول الخارجي...")
+                
+                # Terminate the bot process
+                self.bot_process.terminate()
+                
+                # Wait for process to end (with timeout)
+                try:
+                    self.bot_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't stop gracefully
+                    self.bot_process.kill()
+                    self.add_log("⚡ تم إنهاء البوت قسرياً")
+                
+                self.status_indicator.config(text="⚫ متوقف", fg='#ff6666')
+                self.start_button.config(state='normal')
+                self.stop_button.config(state='disabled')
+                self.add_log("✅ تم إيقاف البوت الخارجي بنجاح")
+                
+                # Reset bot start time
+                self.bot_start_time = None
+                self.bot_process = None
+            else:
+                self.add_log("⚠️ البوت متوقف بالفعل")
+                self.status_indicator.config(text="⚫ متوقف", fg='#ff6666')
+                self.start_button.config(state='normal')
+                self.stop_button.config(state='disabled')
+                
+        except Exception as e:
+            self.add_log(f"❌ خطأ في إيقاف البوت: {str(e)}")
+            messagebox.showerror("خطأ", f"خطأ في إيقاف البوت: {str(e)}")
+    
+    def _read_bot_output(self):
+        """Read output from external bot process and display in log"""
+        if not hasattr(self, 'bot_process') or not self.bot_process:
+            return
             
-            # Reset bot start time
-            self.bot_start_time = None
-        else:
-            self.add_log(f"❌ {message}")
-            messagebox.showerror("خطأ", message)
+        try:
+            while self.bot_process and self.bot_process.poll() is None:
+                line = self.bot_process.stdout.readline()
+                if line:
+                    # Remove newlines and format for display
+                    clean_line = line.strip()
+                    if clean_line:
+                        # Use root.after to safely update GUI from thread
+                        self.root.after(0, lambda msg=clean_line: self.add_log(f"🤖 {msg}"))
+                else:
+                    time.sleep(0.1)
+                    
+        except Exception as e:
+            self.root.after(0, lambda: self.add_log(f"❌ خطأ في قراءة مخرجات البوت: {str(e)}"))
+    
+    def _handle_bot_stopped(self):
+        """Handle when external bot process stops"""
+        self.add_log("⚠️ تم إيقاف البوت الخارجي")
+        self.status_indicator.config(text="⚫ متوقف", fg='#ff6666')
+        self.start_button.config(state='normal')
+        self.stop_button.config(state='disabled')
+        self.bot_start_time = None
+        self.bot_process = None
     
     def add_log(self, message):
         """Add message to log"""
@@ -2533,7 +2701,13 @@ class TradingBotUI:
         """Monitor system status"""
         while self.is_monitoring:
             try:
-                # Update users count button
+                # Check if external bot process is still running
+                if hasattr(self, 'bot_process') and self.bot_process:
+                    if self.bot_process.poll() is not None:
+                        # Bot process has ended
+                        self.root.after(0, lambda: self._handle_bot_stopped())
+                
+                # Update users count button (read from embedded bot for user management)
                 if hasattr(self, 'users_count_button'):
                     users_count = self.embedded_bot.get_users_count()
                     self.root.after(0, lambda: self.users_count_button.config(
@@ -2547,9 +2721,12 @@ class TradingBotUI:
     
     def on_closing(self):
         """Handle window closing"""
-        if self.embedded_bot.is_running:
+        # Check if external bot is running
+        bot_running = hasattr(self, 'bot_process') and self.bot_process and self.bot_process.poll() is None
+        
+        if bot_running:
             if messagebox.askokcancel("إنهاء", "البوت لا يزال يعمل. إيقاف البوت والخروج؟"):
-                self.embedded_bot.stop_bot()
+                self.stop_bot()
                 self.is_monitoring = False
                 self.root.destroy()
         else:
