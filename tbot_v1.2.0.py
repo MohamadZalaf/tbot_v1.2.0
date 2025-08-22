@@ -2347,6 +2347,54 @@ user_capitals = {}  # رؤوس أموال المستخدمين
 user_states = {}    # حالات المستخدمين
 
 # وظيفة للتحقق من صلاحية المستخدم
+def save_user_info(user_id: int, user_info) -> None:
+    """حفظ معلومات المستخدم في ملف JSON"""
+    try:
+        user_file = os.path.join(USERS_DIR, f"user_{user_id}.json")
+        user_data = {
+            'user_id': str(user_id),
+            'username': user_info.username or 'N/A',
+            'first_name': user_info.first_name or 'N/A',
+            'last_name': user_info.last_name or '',
+            'registration_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'last_activity': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'trading_mode': 'scalping'
+        }
+        
+        # إذا كان الملف موجود، احتفظ بتاريخ التسجيل الأصلي
+        if os.path.exists(user_file):
+            try:
+                with open(user_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    user_data['registration_date'] = existing_data.get('registration_date', user_data['registration_date'])
+                    user_data['trading_mode'] = existing_data.get('trading_mode', user_data['trading_mode'])
+            except:
+                pass
+        
+        with open(user_file, 'w', encoding='utf-8') as f:
+            json.dump(user_data, f, ensure_ascii=False, indent=2)
+            
+        logger.debug(f"[USER_INFO] تم حفظ معلومات المستخدم {user_id}")
+        
+    except Exception as e:
+        logger.error(f"[USER_INFO] خطأ في حفظ معلومات المستخدم {user_id}: {e}")
+
+def update_user_activity(user_id: int) -> None:
+    """تحديث آخر نشاط للمستخدم"""
+    try:
+        user_file = os.path.join(USERS_DIR, f"user_{user_id}.json")
+        if os.path.exists(user_file):
+            with open(user_file, 'r', encoding='utf-8') as f:
+                user_data = json.load(f)
+            
+            user_data['last_activity'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            with open(user_file, 'w', encoding='utf-8') as f:
+                json.dump(user_data, f, ensure_ascii=False, indent=2)
+                
+    except Exception as e:
+        logger.error(f"[USER_ACTIVITY] خطأ في تحديث نشاط المستخدم {user_id}: {e}")
+
 def is_user_authenticated(user_id: int) -> bool:
     """التحقق من أن المستخدم مُصرح له بالوصول"""
     return user_sessions.get(user_id, {}).get('authenticated', False)
@@ -2372,6 +2420,9 @@ def require_authentication(func):
                     "🔐 يرجى إدخال كلمة المرور أولاً بكتابة /start"
                 )
                 return
+        
+        # تحديث آخر نشاط للمستخدم
+        update_user_activity(user_id)
         
         return func(message_or_call)
     return wrapper
@@ -2499,12 +2550,13 @@ user_timezones = {}  # المناطق الزمنية للمستخدمين
 
 # مجلدات تخزين البيانات
 DATA_DIR = "trading_data"
+USERS_DIR = os.path.join(DATA_DIR, "users")
 FEEDBACK_DIR = os.path.join(DATA_DIR, "user_feedback")
 TRADE_LOGS_DIR = os.path.join(DATA_DIR, "trade_logs")
 CHAT_LOGS_DIR = os.path.join(DATA_DIR, "chat_logs")
 
 # إنشاء المجلدات إذا لم تكن موجودة
-for directory in [DATA_DIR, FEEDBACK_DIR, TRADE_LOGS_DIR, CHAT_LOGS_DIR]:
+for directory in [DATA_DIR, USERS_DIR, FEEDBACK_DIR, TRADE_LOGS_DIR, CHAT_LOGS_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # رسائل تحذير للمكتبات المفقودة
@@ -9753,36 +9805,32 @@ def handle_start(message):
     user_id = message.from_user.id
     
     # التحقق من كلمة المرور
-    if user_id not in user_sessions or not user_sessions[user_id].get('authenticated', False):
-        # تسجيل محاولة الوصول
-        user_info = message.from_user
-        logger.info(f"[ACCESS] محاولة وصول غير مصرح: {user_info.first_name} {user_info.last_name or ''} (@{user_info.username or 'N/A'}) - ID: {user_id}")
-        
+    if user_id not in user_sessions:
         # إنشاء كيبورد مخفي لإدخال كلمة السر
         hide_keyboard = types.ReplyKeyboardRemove()
         bot.send_message(
             chat_id=user_id,
-            text="🔐 Please enter the password to access the bot:",
+            text="🔐 يرجى إدخال كلمة المرور للوصول إلى البوت:",
             reply_markup=hide_keyboard
         )
         user_states[user_id] = 'waiting_password'
         return
     
-    # Welcome message
+    # رسالة الترحيب
     welcome_message = f"""
-🎉 **Welcome to Advanced Trading Bot v1.2.0!**
+🎉 **مرحباً بك في بوت التداول المتقدم v1.2.0!**
 
-🚀 **New Features:**
-✅ Real-time data from MetaTrader5
-✅ Smart analysis with Google Gemini AI
-✅ Notification rating system 👍👎
-✅ Machine learning from your feedback
+🚀 **الميزات الجديدة:**
+✅ بيانات لحظية حقيقية من MetaTrader5
+✅ تحليل ذكي بتقنية Google Gemini AI
+✅ نظام تقييم الإشعارات 👍👎
+✅ تعلم آلي من تقييماتك
 
-📊 **Connection Status:**
-• MetaTrader5: {'✅ Connected' if mt5_manager.connected else '❌ Disconnected'}
-• Gemini AI: {'✅ Available' if GEMINI_AVAILABLE else '❌ Unavailable'}
+📊 **حالة الاتصال:**
+• MetaTrader5: {'✅ متصل' if mt5_manager.connected else '❌ غير متصل'}
+• Gemini AI: {'✅ متاح' if GEMINI_AVAILABLE else '❌ غير متاح'}
 
-🎯 **To Start:** Use the buttons below to navigate between functions.
+🎯 **للبدء:** استخدم الأزرار في الأسفل للتنقل بين الوظائف.
     """
     
     bot.send_message(
@@ -10218,30 +10266,23 @@ def handle_password(message):
     user_id = message.from_user.id
     
     if message.text == BOT_PASSWORD:
-        # تسجيل معلومات المستخدم
-        user_info = message.from_user
-        logger.info(f"[AUTH] تم تسجيل دخول المستخدم: {user_info.first_name} {user_info.last_name or ''} (@{user_info.username or 'N/A'}) - ID: {user_id}")
+        # حفظ معلومات المستخدم
+        save_user_info(user_id, message.from_user)
         
         user_sessions[user_id] = {
             'authenticated': True,
             'trading_mode': 'scalping',
-            'notification_settings': get_user_advanced_notification_settings(user_id),
-            'user_info': {
-                'first_name': user_info.first_name,
-                'last_name': user_info.last_name,
-                'username': user_info.username,
-                'registration_time': datetime.now().isoformat()
-            }
+            'notification_settings': get_user_advanced_notification_settings(user_id)
         }
         
         # إجبار سؤال رأس المال لجميع المستخدمين بعد كلمة المرور
         user_states[user_id] = 'waiting_initial_capital'
         
         message_text = """
-💰 **Welcome! Please set your capital to start**
+💰 **مرحباً بك! يرجى تحديد رأس المال للبدء**
 
-Choose the appropriate capital for you:
-(Can be modified later from settings)
+اختر رأس المال المناسب لك:
+(يمكن تعديله لاحقاً من الإعدادات)
         """
         
         markup = types.InlineKeyboardMarkup(row_width=2)
@@ -10252,7 +10293,7 @@ Choose the appropriate capital for you:
             )
         
         markup.row(
-            create_animated_button("💰 Enter Custom Amount", "initial_custom_capital", "💰")
+            create_animated_button("💰 إدخال مبلغ مخصص", "initial_custom_capital", "💰")
         )
         
         bot.send_message(
@@ -10262,7 +10303,7 @@ Choose the appropriate capital for you:
             reply_markup=markup
         )
     else:
-        bot.reply_to(message, "❌ Wrong password. Try again:")
+        bot.reply_to(message, "❌ كلمة مرور خاطئة. حاول مرة أخرى:")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("initial_capital_"))
 def handle_initial_capital(call):
@@ -10275,8 +10316,8 @@ def handle_initial_capital(call):
         user_states.pop(user_id, None)
         
         bot.edit_message_text(
-            f"✅ Capital set: ${capital:,}\n\n"
-            "🎉 Welcome to Advanced Trading Bot v1.2.0!",
+            f"✅ تم تحديد رأس المال: ${capital:,}\n\n"
+            "🎉 مرحباً بك في بوت التداول المتقدم v1.2.0!",
             call.message.chat.id,
             call.message.message_id,
             reply_markup=None
@@ -13090,23 +13131,20 @@ def handle_unknown_message(message):
     user_id = message.from_user.id
     
     # التحقق من كلمة السر أولاً
-    if user_id not in user_sessions or not user_sessions[user_id].get('authenticated', False):
+    if user_id not in user_sessions:
         # إذا لم يكن المستخدم في حالة انتظار كلمة السر، ضعه في هذه الحالة
         if user_states.get(user_id) != 'waiting_password':
-            user_info = message.from_user
-            logger.info(f"[UNKNOWN_MSG] رسالة غير مصرحة من: {user_info.first_name} {user_info.last_name or ''} (@{user_info.username or 'N/A'}) - ID: {user_id}")
-            
             hide_keyboard = types.ReplyKeyboardRemove()
             bot.send_message(
                 chat_id=user_id,
-                text="🔐 You must enter the password first to access the bot:",
+                text="🔐 يجب إدخال كلمة المرور أولاً للوصول إلى البوت:",
                 reply_markup=hide_keyboard
             )
             user_states[user_id] = 'waiting_password'
         return
     
-    # If user is authenticated, send unknown message
-    bot.reply_to(message, "❓ Unknown command. Use the buttons below to navigate.")
+    # إذا كان المستخدم مصدق، أرسل رسالة غير معروفة
+    bot.reply_to(message, "❓ أمر غير معروف. استخدم الأزرار في الأسفل للتنقل.")
 
 # ===== معالجات المنطقة الزمنية =====
 @bot.callback_query_handler(func=lambda call: call.data == "timezone_settings")

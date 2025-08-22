@@ -508,17 +508,35 @@ class TradingBotUI:
             # Try to use icon.ico file first
             if os.path.exists('icon.ico'):
                 self.root.iconbitmap('icon.ico')
+                # Also create small icon for interface use
+                self.create_interface_icon()
             else:
                 # Fallback to embedded icon
                 icon_data = base64.b64decode(EMBEDDED_ICON)
                 icon_image = tk.PhotoImage(data=icon_data)
                 self.root.iconphoto(False, icon_image)
+                self.small_icon = None
         except Exception as e:
             print(f"Failed to set icon: {e}")
+            self.small_icon = None
             pass
         
         # Configure main style
         self.root.configure(bg='#2b2b2b')
+    
+    def create_interface_icon(self):
+        """Create small icon for interface use"""
+        try:
+            from PIL import Image, ImageTk
+            # Load and resize icon
+            icon_image = Image.open('icon.ico')
+            # Create different sizes for different uses
+            self.small_icon = ImageTk.PhotoImage(icon_image.resize((24, 24), Image.Resampling.LANCZOS))
+            self.medium_icon = ImageTk.PhotoImage(icon_image.resize((48, 48), Image.Resampling.LANCZOS))
+        except Exception as e:
+            print(f"Failed to create interface icons: {e}")
+            self.small_icon = None
+            self.medium_icon = None
         
         # Create main frame
         self.main_frame = tk.Frame(self.root, bg='#2b2b2b')
@@ -528,10 +546,18 @@ class TradingBotUI:
         """Create login interface"""
         self.login_frame = tk.Frame(self.main_frame, bg='#2b2b2b')
         
-        # Title
+        # Bot icon and title
+        if hasattr(self, 'medium_icon') and self.medium_icon:
+            icon_label = tk.Label(
+                self.login_frame,
+                image=self.medium_icon,
+                bg='#2b2b2b'
+            )
+            icon_label.pack(pady=(20, 10))
+        
         title_label = tk.Label(
             self.login_frame,
-            text="🤖 بوت التداول المتقدم",
+            text="بوت التداول المتقدم",
             font=("Arial", 24, "bold"),
             fg='#00ff00',
             bg='#2b2b2b'
@@ -617,10 +643,21 @@ class TradingBotUI:
         )
         settings_button.pack(side=tk.LEFT, padx=5)
         
-        # Title
+        # Icon and Title
+        title_container = tk.Frame(header_frame, bg='#2b2b2b')
+        title_container.pack(expand=True)
+        
+        if hasattr(self, 'small_icon') and self.small_icon:
+            icon_label = tk.Label(
+                title_container,
+                image=self.small_icon,
+                bg='#2b2b2b'
+            )
+            icon_label.pack(side=tk.LEFT, padx=(0, 10))
+        
         header_label = tk.Label(
-            header_frame,
-            text="🤖 لوحة التحكم في بوت التداول - نظام مدمج كامل",
+            title_container,
+            text="لوحة التحكم في بوت التداول - نظام مدمج كامل",
             font=("Arial", 18, "bold"),
             fg='#00ff00',
             bg='#2b2b2b'
@@ -721,10 +758,21 @@ class TradingBotUI:
         log_frame = tk.Frame(self.control_frame, bg='#2b2b2b')
         log_frame.pack(fill=tk.BOTH, expand=True, pady=20)
         
-        # Log label
+        # Log label with icon
+        log_header_frame = tk.Frame(log_frame, bg='#2b2b2b')
+        log_header_frame.pack(anchor=tk.W)
+        
+        if hasattr(self, 'small_icon') and self.small_icon:
+            log_icon_label = tk.Label(
+                log_header_frame,
+                image=self.small_icon,
+                bg='#2b2b2b'
+            )
+            log_icon_label.pack(side=tk.LEFT, padx=(0, 5))
+        
         log_label = tk.Label(
-            log_frame,
-            text="📝 سجل الأحداث:",
+            log_header_frame,
+            text="سجل الأحداث:",
             font=("Arial", 12, "bold"),
             fg='#ffffff',
             bg='#2b2b2b'
@@ -2325,14 +2373,22 @@ class TradingBotUI:
             main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
             
             # App icon/title
-            title_label = tk.Label(
-                main_frame,
-                text="🤖",
-                font=("Arial", 48),
-                fg='#00ff00',
-                bg='#2b2b2b'
-            )
-            title_label.pack(pady=10)
+            if hasattr(self, 'medium_icon') and self.medium_icon:
+                icon_label = tk.Label(
+                    main_frame,
+                    image=self.medium_icon,
+                    bg='#2b2b2b'
+                )
+                icon_label.pack(pady=10)
+            else:
+                title_label = tk.Label(
+                    main_frame,
+                    text="🤖",
+                    font=("Arial", 48),
+                    fg='#00ff00',
+                    bg='#2b2b2b'
+                )
+                                 title_label.pack(pady=10)
             
             # App name
             app_name_label = tk.Label(
