@@ -2058,7 +2058,7 @@ def format_short_alert_message(symbol: str, symbol_info: Dict, price_data: Dict,
                     # للبيع: الهدف الأول نقاط أكثر (6-8) 
                     points1 = random.randint(6, 8)
                 else:
-                    points1 = random.randint(4, 6)
+                    points1 = random.randint(5, 7)
                 
                 # حساب النقاط للهدف الثاني
                 if action == 'BUY':
@@ -7970,24 +7970,24 @@ class GeminiAnalyzer:
             ask = price_data.get('ask', 0)
             spread = price_data.get('spread', 0)
             
-                    # المؤشرات الفنية الجديدة متعددة الإطارات للتحليل الخلفي المحسن
-        multi_tf_indicators = None
-        try:
-            logger.info(f"[AUTO_AI_INDICATORS] جلب المؤشرات متعددة الإطارات للتحليل الآلي للرمز {symbol}")
-            multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
-            # استخدام المؤشرات الجديدة في التحليل الخلفي
-            indicators = self._consolidate_multi_tf_indicators_for_background_analysis(multi_tf_indicators)
-            logger.info(f"[AUTO_AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للتحليل الخلفي للرمز {symbol}")
-        except Exception as indicators_error:
-            logger.error(f"[AUTO_AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
-            # fallback للمؤشرات القديمة
-            indicators = technical_data.get('indicators', {}) if technical_data else {}
-        
-        # تجميع جميع البيانات للتحليل الخلفي مع بيانات الفريمات الكاملة
-        background_prompt = self._build_enhanced_background_prompt(
-            symbol, current_price, bid, ask, spread, indicators, 
-            trading_mode, capital, timezone_str, multi_tf_indicators
-        )
+            # المؤشرات الفنية الجديدة متعددة الإطارات للتحليل الخلفي المحسن
+            multi_tf_indicators = None
+            try:
+                logger.info(f"[AUTO_AI_INDICATORS] جلب المؤشرات متعددة الإطارات للتحليل الآلي للرمز {symbol}")
+                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+                # استخدام المؤشرات الجديدة في التحليل الخلفي
+                indicators = self._consolidate_multi_tf_indicators_for_background_analysis(multi_tf_indicators)
+                logger.info(f"[AUTO_AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للتحليل الخلفي للرمز {symbol}")
+            except Exception as indicators_error:
+                logger.error(f"[AUTO_AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
+                # fallback للمؤشرات القديمة
+                indicators = technical_data.get('indicators', {}) if technical_data else {}
+            
+            # تجميع جميع البيانات للتحليل الخلفي مع بيانات الفريمات الكاملة
+            background_prompt = self._build_enhanced_background_prompt(
+                symbol, current_price, bid, ask, spread, indicators, 
+                trading_mode, capital, timezone_str, multi_tf_indicators
+            )
             
             # تحليل خلفي عبر AI لجميع هذه البيانات
             ai_background_analysis = self._send_to_gemini(background_prompt)
