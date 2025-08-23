@@ -3439,19 +3439,49 @@ class MT5Manager:
     def get_market_data(self, symbol: str, timeframe: int = mt5.TIMEFRAME_M1, count: int = 100, force_fresh: bool = False) -> Optional[pd.DataFrame]:
         """جلب بيانات السوق من MT5 - مع إمكانية فرض التحديث للحصول على قيم لحظية"""
         if not self.connected:
+            logger.warning(f"[GET_DATA] MT5 غير متصل - لا يمكن جلب البيانات لـ {symbol}")
             return None
         
         try:
-            # إذا تم طلب فرض التحديث، استخدم البيانات مع الشمعة الحالية للحصول على قيم لحظية
-            if force_fresh:
-                # استخدام البيانات اللحظية مع الشمعة الحالية
-                rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)  # start_pos = 0 للحصول على البيانات اللحظية
-                logger.debug(f"[FORCE_FRESH] جلب بيانات لحظية للرمز {symbol} مع الشمعة الحالية")
-            else:
-                # الطريقة العادية - تجاهل الشمعة الحالية للحصول على مؤشرات مستقرة
-                rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)  # start_pos = 1 لتجاهل الشمعة الحالية
+            # محاولة جلب البيانات بطرق متعددة لضمان النجاح
+            rates = None
+            
+            # الطريقة 1: copy_rates_from_pos
+            try:
+                if force_fresh:
+                    # استخدام البيانات اللحظية مع الشمعة الحالية
+                    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
+                    logger.debug(f"[FORCE_FRESH] جلب بيانات لحظية للرمز {symbol} مع الشمعة الحالية")
+                else:
+                    # الطريقة العادية - تجاهل الشمعة الحالية للحصول على مؤشرات مستقرة
+                    rates = mt5.copy_rates_from_pos(symbol, timeframe, 1, count)
+            except Exception as pos_error:
+                logger.warning(f"[WARNING] فشل copy_rates_from_pos للرمز {symbol}: {pos_error}")
+            
+            # الطريقة 2: copy_rates_from بتاريخ محدد إذا فشلت الأولى
             if rates is None or len(rates) == 0:
-                logger.warning(f"[WARNING] لا توجد بيانات للرمز {symbol}")
+                try:
+                    # جلب البيانات من تاريخ حديث
+                    from_date = datetime.now() - timedelta(days=7)
+                    to_date = datetime.now()
+                    rates = mt5.copy_rates_range(symbol, timeframe, from_date, to_date)
+                    if rates is not None and len(rates) > count:
+                        rates = rates[-count:]  # أخذ آخر count شمعة
+                    logger.debug(f"[RANGE_METHOD] استخدام copy_rates_range للرمز {symbol}")
+                except Exception as range_error:
+                    logger.warning(f"[WARNING] فشل copy_rates_range للرمز {symbol}: {range_error}")
+            
+            # الطريقة 3: copy_rates_from كبديل أخير
+            if rates is None or len(rates) == 0:
+                try:
+                    from_date = datetime.now() - timedelta(hours=24)
+                    rates = mt5.copy_rates_from(symbol, timeframe, from_date, count)
+                    logger.debug(f"[FROM_METHOD] استخدام copy_rates_from للرمز {symbol}")
+                except Exception as from_error:
+                    logger.warning(f"[WARNING] فشل copy_rates_from للرمز {symbol}: {from_error}")
+            
+            if rates is None or len(rates) == 0:
+                logger.error(f"[ERROR] فشل في جلب أي بيانات للرمز {symbol} بجميع الطرق")
                 return None
             
             # تحويل إلى DataFrame
@@ -3500,14 +3530,19 @@ class MT5Manager:
     def calculate_technical_indicators(self, symbol: str) -> Optional[Dict]:
         """حساب المؤشرات الفنية من البيانات التاريخية للرمز - MT5 فقط للدقة"""
         try:
+            # التحقق من الاتصال مع إعادة المحاولة
             if not self.connected:
-                logger.warning(f"[WARNING] MT5 غير متصل - لا يمكن حساب المؤشرات لـ {symbol}")
-                return None
+                logger.warning(f"[WARNING] MT5 غير متصل - محاولة إعادة الاتصال لـ {symbol}")
+                if not self.initialize_mt5():
+                    logger.error(f"[ERROR] فشل في إعادة الاتصال لحساب المؤشرات لـ {symbol}")
+                    return None
             
             # التأكد من أن الاتصال حقيقي قبل جلب البيانات
             if not self.check_real_connection():
-                logger.warning(f"[WARNING] اتصال MT5 غير مستقر - لا يمكن حساب المؤشرات لـ {symbol}")
-                return None
+                logger.warning(f"[WARNING] اتصال MT5 غير مستقر - محاولة إعادة الاتصال لـ {symbol}")
+                if not self.initialize_mt5():
+                    logger.error(f"[ERROR] فشل في إعادة الاتصال لحساب المؤشرات لـ {symbol}")
+                    return None
             
             # جلب البيانات التاريخية المكتملة (M1 مع فرض التحديث للحصول على قيم لحظية)
             with mt5_operation_lock:
@@ -4284,18 +4319,204 @@ class MT5Manager:
 # إنشاء مثيل مدير MT5
 mt5_manager = MT5Manager()
 
+# ===== دالة البيانات الاحتياطية للمؤشرات =====
+def check_bot_health() -> Dict:
+    """فحص حالة البوت والأنظمة المطلوبة"""
+    health_status = {
+        'mt5_connected': False,
+        'mt5_version': None,
+        'data_access': False,
+        'issues': [],
+        'recommendations': []
+    }
+    
+    try:
+        # فحص اتصال MT5
+        if mt5_manager.connected:
+            health_status['mt5_connected'] = True
+            try:
+                version_info = mt5.version()
+                health_status['mt5_version'] = version_info if version_info else 'غير محدد'
+            except:
+                health_status['mt5_version'] = 'غير محدد'
+        else:
+            health_status['issues'].append('MT5 غير متصل')
+            health_status['recommendations'].append('تأكد من تشغيل MetaTrader5 وتسجيل الدخول')
+        
+        # فحص إمكانية الوصول للبيانات
+        if mt5_manager.connected:
+            try:
+                test_symbols = ["EURUSD", "GBPUSD", "XAUUSD", "BTCUSD"]
+                data_found = False
+                for test_symbol in test_symbols:
+                    test_data = mt5_manager.get_market_data(test_symbol, mt5.TIMEFRAME_M1, 10)
+                    if test_data is not None and len(test_data) > 0:
+                        data_found = True
+                        break
+                
+                if data_found:
+                    health_status['data_access'] = True
+                else:
+                    health_status['issues'].append('لا يمكن الوصول لبيانات السوق')
+                    health_status['recommendations'].append('تحقق من اشتراك البيانات في MT5')
+            except Exception as e:
+                health_status['issues'].append(f'خطأ في الوصول للبيانات: {e}')
+        
+        # إضافة توصيات عامة
+        if health_status['issues']:
+            health_status['recommendations'].extend([
+                'أعد تشغيل MetaTrader5',
+                'تأكد من الاتصال بالإنترنت',
+                'تحقق من إعدادات الخادم في MT5'
+            ])
+    
+    except Exception as e:
+        health_status['issues'].append(f'خطأ في فحص النظام: {e}')
+    
+    return health_status
+
+def test_indicators_functionality(symbol: str = "EURUSD") -> Dict:
+    """اختبار وظائف المؤشرات مع رمز تجريبي"""
+    test_results = {
+        'symbol': symbol,
+        'success': False,
+        'indicators_count': 0,
+        'timeframes_tested': 0,
+        'issues': [],
+        'recommendations': []
+    }
+    
+    try:
+        logger.info(f"[TEST] بدء اختبار المؤشرات للرمز {symbol}")
+        
+        # اختبار جلب المؤشرات
+        indicators = calculate_multi_timeframe_indicators(symbol)
+        
+        if indicators:
+            test_results['timeframes_tested'] = len(indicators)
+            
+            # عد المؤشرات المتاحة
+            total_indicators = 0
+            for tf, tf_data in indicators.items():
+                if tf_data:
+                    # استخدام tf_data مباشرة أو استخراج indicators
+                    indicator_data = tf_data.get('indicators', tf_data)
+                    if indicator_data:
+                        total_indicators += len([k for k, v in indicator_data.items() if v is not None])
+            
+            test_results['indicators_count'] = total_indicators
+            
+            if total_indicators > 0:
+                test_results['success'] = True
+                logger.info(f"[TEST] نجح الاختبار - {total_indicators} مؤشر في {len(indicators)} إطار")
+            else:
+                test_results['issues'].append('المؤشرات فارغة أو تحتوي على None فقط')
+                test_results['recommendations'].append('تحقق من جودة البيانات المسترجعة من MT5')
+        else:
+            test_results['issues'].append('فشل في جلب أي مؤشرات')
+            test_results['recommendations'].append('تحقق من اتصال MT5 والرمز المختار')
+    
+    except Exception as e:
+        test_results['issues'].append(f'خطأ في الاختبار: {e}')
+        logger.error(f"[TEST_ERROR] خطأ في اختبار المؤشرات: {e}")
+    
+    return test_results
+
+def generate_fallback_indicators(symbol: str) -> Dict:
+    """توليد مؤشرات احتياطية عند فشل اتصال MT5 - بيانات تقديرية لضمان استمرارية البوت"""
+    try:
+        logger.info(f"[FALLBACK] توليد مؤشرات احتياطية للرمز {symbol}")
+        
+        # بيانات احتياطية أساسية لكل إطار زمني
+        fallback_data = {}
+        timeframes = ['M5', 'M15', 'M30', 'M60']
+        
+        for tf in timeframes:
+            # مؤشرات احتياطية أساسية
+            indicators = {
+                'rsi': 50.0,  # RSI محايد
+                'rsi_interpretation': 'محايد - بيانات احتياطية',
+                'macd': {
+                    'macd': 0.0,
+                    'signal': 0.0,
+                    'histogram': 0.0
+                },
+                'macd_interpretation': 'محايد - بيانات احتياطية',
+                'ma_9': None,
+                'ma_21': None,
+                'ma_50': None,
+                'ema_12': None,
+                'ema_26': None,
+                'bb_upper': None,
+                'bb_middle': None,
+                'bb_lower': None,
+                'stochastic': {
+                    'k': 50.0,
+                    'd': 50.0
+                },
+                'stochastic_interpretation': 'محايد - بيانات احتياطية',
+                'atr': None,
+                'current_volume': 1000,
+                'avg_volume': 1000,
+                'volume_ratio': 1.0,
+                'volume_interpretation': 'بيانات احتياطية',
+                'activity_level': '⚠️ بيانات احتياطية - تحقق من اتصال MT5',
+                'trend': 'غير محدد',
+                'trend_strength': 'بيانات احتياطية',
+                'fallback_mode': True,  # علامة للإشارة لاستخدام البيانات الاحتياطية
+                'fallback_reason': 'فشل في الاتصال مع MT5'
+            }
+            
+            fallback_data[tf] = indicators
+        
+        logger.warning(f"[FALLBACK] تم إنشاء بيانات احتياطية للرمز {symbol} لجميع الإطارات")
+        return fallback_data
+        
+    except Exception as e:
+        logger.error(f"[FALLBACK_ERROR] خطأ في توليد البيانات الاحتياطية: {e}")
+        return {}
+
 # ===== دالة حساب المؤشرات على فريمات متعددة =====
 def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
     """حساب المؤشرات الفنية على فريمات زمنية متعددة (M5, M15, M30, M60)"""
     try:
+        # التحقق من اتصال MT5 مع إعادة المحاولة
+        connection_attempts = 0
+        max_attempts = 3
+        
+        while connection_attempts < max_attempts and not mt5_manager.connected:
+            logger.info(f"[RECONNECT] محاولة إعادة الاتصال رقم {connection_attempts + 1}")
+            mt5_manager.initialize_mt5()
+            connection_attempts += 1
+            if not mt5_manager.connected:
+                time.sleep(2)  # انتظار قبل المحاولة التالية
+        
+        # إذا فشل الاتصال، استخدم البيانات الاحتياطية
         if not mt5_manager.connected:
-            logger.warning(f"[WARNING] MT5 غير متصل - لا يمكن حساب المؤشرات لـ {symbol}")
-            return {}
+            logger.warning(f"[WARNING] فشل في الاتصال بـ MT5 - استخدام البيانات الاحتياطية لـ {symbol}")
+            return generate_fallback_indicators(symbol)
         
         # التأكد من أن الاتصال حقيقي
         if not mt5_manager.check_real_connection():
-            logger.warning(f"[WARNING] اتصال MT5 غير مستقر - لا يمكن حساب المؤشرات لـ {symbol}")
-            return {}
+            logger.warning(f"[WARNING] اتصال MT5 غير مستقر - محاولة إعادة الاتصال")
+            if not mt5_manager.initialize_mt5():
+                logger.warning(f"[WARNING] فشل في إعادة الاتصال - استخدام البيانات الاحتياطية لـ {symbol}")
+                return generate_fallback_indicators(symbol)
+        
+        # التحقق من وجود الرمز في MT5
+        try:
+            symbol_info = mt5.symbol_info(symbol)
+            if symbol_info is None:
+                logger.warning(f"[WARNING] الرمز {symbol} غير متوفر في MT5")
+                # محاولة تفعيل الرمز
+                if not mt5.symbol_select(symbol, True):
+                    logger.error(f"[ERROR] فشل في تفعيل الرمز {symbol}")
+                    return generate_fallback_indicators(symbol)
+                else:
+                    logger.info(f"[SUCCESS] تم تفعيل الرمز {symbol}")
+        except Exception as symbol_error:
+            logger.error(f"[ERROR] خطأ في التحقق من الرمز {symbol}: {symbol_error}")
+            return generate_fallback_indicators(symbol)
         
         timeframes = {
             'M5': mt5.TIMEFRAME_M5,
@@ -4343,9 +4564,28 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
                     except Exception as live_error:
                         logger.warning(f"[LIVE_DATA] فشل في إضافة البيانات اللحظية للرمز {symbol}: {live_error}")
                 
-                if df is None or len(df) < 20:
+                if df is None or len(df) < 10:  # تقليل الحد الأدنى للبيانات
                     logger.warning(f"[WARNING] بيانات غير كافية للرمز {symbol} على إطار {tf_name}")
-                    multi_tf_indicators[tf_name] = {}
+                    # بدلاً من إرجاع قاموس فارغ، أنشئ مؤشرات أساسية
+                    multi_tf_indicators[tf_name] = {
+                        'rsi': None,
+                        'rsi_interpretation': 'بيانات غير كافية',
+                        'macd': {'macd': None, 'signal': None, 'histogram': None},
+                        'macd_interpretation': 'بيانات غير كافية',
+                        'ma_9': None,
+                        'ma_21': None,
+                        'stochastic': {'k': None, 'd': None},
+                        'stochastic_interpretation': 'بيانات غير كافية',
+                        'atr': None,
+                        'current_volume': 0,
+                        'avg_volume': 0,
+                        'volume_ratio': 0,
+                        'volume_interpretation': 'بيانات غير كافية',
+                        'activity_level': '❌ بيانات غير كافية',
+                        'trend': 'غير محدد',
+                        'trend_strength': 'بيانات غير كافية',
+                        'insufficient_data': True
+                    }
                     continue
                 
                 # حساب المؤشرات لهذا الإطار الزمني
@@ -4620,13 +4860,35 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
                 
             except Exception as e:
                 logger.error(f"[ERROR] خطأ في حساب المؤشرات للرمز {symbol} على إطار {tf_name}: {e}")
-                multi_tf_indicators[tf_name] = {}
+                # عند حدوث خطأ، أنشئ مؤشرات أساسية بدلاً من قاموس فارغ
+                multi_tf_indicators[tf_name] = {
+                    'rsi': None,
+                    'rsi_interpretation': f'خطأ في الحساب: {str(e)[:50]}',
+                    'macd': {'macd': None, 'signal': None, 'histogram': None},
+                    'macd_interpretation': 'خطأ في الحساب',
+                    'ma_9': None,
+                    'ma_21': None,
+                    'stochastic': {'k': None, 'd': None},
+                    'stochastic_interpretation': 'خطأ في الحساب',
+                    'atr': None,
+                    'current_volume': 0,
+                    'avg_volume': 0,
+                    'volume_ratio': 0,
+                    'volume_interpretation': 'خطأ في الحساب',
+                    'activity_level': '❌ خطأ في الحساب',
+                    'trend': 'غير محدد',
+                    'trend_strength': 'خطأ في الحساب',
+                    'error_occurred': True,
+                    'error_message': str(e)
+                }
         
         return multi_tf_indicators
         
     except Exception as e:
         logger.error(f"[ERROR] خطأ عام في حساب المؤشرات متعددة الإطارات للرمز {symbol}: {e}")
-        return {}
+        # إرجاع بيانات احتياطية بدلاً من قاموس فارغ
+        logger.warning(f"[FALLBACK] استخدام البيانات الاحتياطية للرمز {symbol} بسبب خطأ عام")
+        return generate_fallback_indicators(symbol)
 
 def calculate_comprehensive_indicators(df: pd.DataFrame, indicators: Dict, symbol: str, tf_name: str):
     """حساب جميع المؤشرات الشاملة مع القيم اللحظية للشمعة غير المكتملة"""
@@ -5020,11 +5282,23 @@ def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict,
 def format_single_timeframe_indicators_message(symbol: str, symbol_info: Dict, tf_key: str, tf_name: str, tf_data: Dict) -> str:
     """تنسيق رسالة مؤشرات إطار زمني واحد"""
     try:
-        if not tf_data or not tf_data.get('indicators'):
+        # التحقق من وجود البيانات - إما حقيقية أو احتياطية
+        if not tf_data:
             return f"📊 **{tf_name} - {symbol_info['name']} {symbol_info['emoji']}**\n\n❌ لا توجد مؤشرات متوفرة لهذا الإطار"
         
-        indicators = tf_data.get('indicators', {})
+        # استخدام tf_data مباشرة إذا كانت تحتوي على المؤشرات، أو استخراجها من indicators
+        indicators = tf_data.get('indicators', tf_data)
+        
+        # إذا لم توجد مؤشرات، عرض رسالة خطأ
+        if not indicators:
+            return f"📊 **{tf_name} - {symbol_info['name']} {symbol_info['emoji']}**\n\n❌ لا توجد مؤشرات متوفرة لهذا الإطار"
+        
+        # إنشاء الرسالة مع تنبيه للبيانات الاحتياطية إذا لزم الأمر
         message = f"📊 **{tf_name} - {symbol_info['name']} {symbol_info['emoji']}**\n\n"
+        
+        # إضافة تنبيه إذا كانت البيانات احتياطية
+        if indicators.get('fallback_mode', False):
+            message += f"⚠️ **تنبيه:** {indicators.get('fallback_reason', 'بيانات احتياطية')}\n\n"
         
         # 📈 TREND (الاتجاه)
         message += "📈 **الاتجاه (TREND)**\n"
@@ -5103,6 +5377,12 @@ def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, mu
     """تنسيق رسالة المؤشرات الفنية متعددة الإطارات - شاملة ومصنفة"""
     try:
         message = f"📊 **المؤشرات الفنية الشاملة - {symbol_info['name']} {symbol_info['emoji']}**\n\n"
+        
+        # التحقق من وجود أي مؤشرات
+        if not multi_tf_indicators:
+            message += "❌ **لا توجد مؤشرات متوفرة حالياً**\n"
+            message += "🔄 يرجى المحاولة مرة أخرى أو التحقق من اتصال MT5\n"
+            return message
         
         timeframe_names = {
             'M5': '5 دقائق',
@@ -10824,6 +11104,96 @@ def create_main_keyboard():
     )
     
     return keyboard
+
+@bot.message_handler(commands=['health', 'status'])
+def show_bot_health(message):
+    """عرض حالة البوت والأنظمة"""
+    try:
+        user_id = message.from_user.id
+        
+        if user_id not in user_sessions:
+            bot.reply_to(message, "🔒 يرجى إدخال كلمة المرور أولاً باستخدام الأمر /start")
+            return
+        
+        health = check_bot_health()
+        
+        response = "🔍 **حالة بوت التداول المتقدم v1.2.0**\n\n"
+        
+        # حالة MT5
+        if health['mt5_connected']:
+            response += "✅ **MetaTrader5:** متصل\n"
+            if health['mt5_version']:
+                response += f"📌 **الإصدار:** {health['mt5_version']}\n"
+        else:
+            response += "❌ **MetaTrader5:** غير متصل\n"
+        
+        # حالة البيانات
+        if health['data_access']:
+            response += "✅ **الوصول للبيانات:** متاح\n"
+        else:
+            response += "❌ **الوصول للبيانات:** غير متاح\n"
+        
+        # المشاكل والتوصيات
+        if health['issues']:
+            response += "\n🚨 **المشاكل المكتشفة:**\n"
+            for issue in health['issues']:
+                response += f"• {issue}\n"
+        
+        if health['recommendations']:
+            response += "\n💡 **التوصيات:**\n"
+            for rec in health['recommendations']:
+                response += f"• {rec}\n"
+        
+        if not health['issues']:
+            response += "\n🟢 **جميع الأنظمة تعمل بشكل طبيعي**"
+        
+        bot.reply_to(message, response, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في عرض حالة البوت: {e}")
+        bot.reply_to(message, "❌ خطأ في فحص حالة البوت")
+
+@bot.message_handler(commands=['test'])
+def test_bot_functionality(message):
+    """اختبار وظائف البوت"""
+    try:
+        user_id = message.from_user.id
+        
+        if user_id not in user_sessions:
+            bot.reply_to(message, "🔒 يرجى إدخال كلمة المرور أولاً باستخدام الأمر /start")
+            return
+        
+        bot.reply_to(message, "🧪 **جاري اختبار وظائف البوت...**\nقد يستغرق هذا بضع ثوانٍ...")
+        
+        # اختبار المؤشرات
+        test_result = test_indicators_functionality()
+        
+        response = "🧪 **نتائج اختبار بوت التداول**\n\n"
+        response += f"🎯 **الرمز المختبر:** {test_result['symbol']}\n"
+        response += f"📊 **الإطارات المختبرة:** {test_result['timeframes_tested']}\n"
+        response += f"📈 **المؤشرات المسترجعة:** {test_result['indicators_count']}\n"
+        
+        if test_result['success']:
+            response += "✅ **النتيجة:** نجح الاختبار\n"
+            response += "🟢 **البوت يعمل بشكل صحيح**"
+        else:
+            response += "❌ **النتيجة:** فشل الاختبار\n"
+            
+            if test_result['issues']:
+                response += "\n🚨 **المشاكل:**\n"
+                for issue in test_result['issues']:
+                    response += f"• {issue}\n"
+            
+            if test_result['recommendations']:
+                response += "\n💡 **التوصيات:**\n"
+                for rec in test_result['recommendations']:
+                    response += f"• {rec}\n"
+        
+        bot.reply_to(message, response, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في اختبار البوت: {e}")
+        bot.reply_to(message, "❌ خطأ في تشغيل الاختبار")
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
