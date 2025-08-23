@@ -5567,23 +5567,39 @@ class GeminiAnalyzer:
             analysis_text = self._analyze_with_full_manual_instructions(symbol, price_data, technical_data, user_id)
             
             if analysis_text:
-                # استخراج التوصية ونسبة الثقة
+                # استخراج التوصية ونسبة الثقة ونسبة النجاح
                 recommendation = self._extract_recommendation(analysis_text)
-                confidence = self._extract_confidence(analysis_text)
+                confidence = self._extract_confidence(analysis_text)  # ثقة الـ AI في التحليل
+                success_rate = self._extract_success_rate_from_ai(analysis_text)  # احتمال نجاح الصفقة
                 
-                # تحسين نسبة الثقة بناءً على التحليل الخلفي
-                enhanced_confidence = confidence
+                # إذا لم يتم العثور على نسبة نجاح، استخدم حساب ديناميكي
+                if success_rate is None:
+                    # حساب نسبة النجاح بناءً على المؤشرات الفنية
+                    success_rate = calculate_ai_success_rate(
+                        {'confidence': confidence}, 
+                        technical_data, 
+                        symbol, 
+                        recommendation or 'HOLD', 
+                        user_id
+                    )
+                    logger.info(f"[DYNAMIC_SUCCESS] حساب نسبة النجاح ديناميكياً للرمز {symbol}: {success_rate:.1f}%")
+                
+                # تحسين نسبة النجاح بناءً على التحليل الخلفي
+                enhanced_success_rate = success_rate
                 if background_analysis and background_analysis.get('enhanced_confidence'):
-                    # دمج نسبة الثقة الأصلية مع التحليل الخلفي المحسن
-                    background_confidence = background_analysis.get('enhanced_confidence', 50)
-                    enhanced_confidence = (confidence * 0.7 + background_confidence * 0.3) if confidence else background_confidence
-                    logger.info(f"[ENHANCED_CONFIDENCE] {symbol}: الأصلية={confidence}%, المحسنة={enhanced_confidence:.1f}%")
+                    # دمج نسبة النجاح مع التحليل الخلفي
+                    background_success = background_analysis.get('enhanced_confidence', 50)
+                    enhanced_success_rate = (success_rate * 0.7 + background_success * 0.3) if success_rate else background_success
+                    logger.info(f"[ENHANCED_SUCCESS] {symbol}: الأصلية={success_rate}%, المحسنة={enhanced_success_rate:.1f}%")
                 
-                # إنشاء كائج التحليل الكامل مع التحسينات الخلفية
-                final_confidence = enhanced_confidence if enhanced_confidence is not None else 50
+                # إنشاء كائن التحليل الكامل مع التفريق بين المفاهيم
+                final_confidence = confidence if confidence is not None else 75  # ثقة الـ AI
+                final_success_rate = enhanced_success_rate if enhanced_success_rate is not None else 65  # احتمال النجاح
+                
                 analysis_result = {
                     'action': recommendation or 'HOLD',
-                    'confidence': final_confidence,
+                    'confidence': final_confidence,  # ثقة الـ AI في التحليل
+                    'success_rate': final_success_rate,  # احتمال نجاح الصفقة (هذا المهم للمتداول!)
                     'reasoning': [analysis_text[:200] + "..."] if len(analysis_text) > 200 else [analysis_text],
                     'ai_analysis': analysis_text,
                     'source': 'Gemini AI (تحليل شامل آلي محسن)',
@@ -5595,19 +5611,32 @@ class GeminiAnalyzer:
                     'multi_tf_indicators': multi_tf_indicators  # إضافة المؤشرات متعددة الإطارات
                 }
                 
-                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بثقة {final_confidence}%")
+                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بنسبة نجاح {final_success_rate:.1f}% (ثقة AI: {final_confidence}%)")
                 return analysis_result
             else:
                 # في حالة فشل التحليل النصي، استخدم التحليل الخلفي فقط
                 logger.warning(f"[AUTO_COMPREHENSIVE] فشل في التحليل النصي للرمز {symbol} - استخدام التحليل الخلفي")
                 
                 if background_analysis and isinstance(background_analysis, dict):
-                    background_confidence = background_analysis.get('enhanced_confidence', 65)
+                    background_success_rate = background_analysis.get('enhanced_confidence', 65)
                     background_action = background_analysis.get('recommendation', 'HOLD')
+                    
+                    # حساب نسبة نجاح إضافية بناءً على المؤشرات الفنية
+                    calculated_success_rate = calculate_ai_success_rate(
+                        background_analysis, 
+                        technical_data, 
+                        symbol, 
+                        background_action, 
+                        user_id
+                    )
+                    
+                    # استخدام الأفضل بين التحليل الخلفي والحساب الديناميكي
+                    final_success_rate = max(background_success_rate, calculated_success_rate) if calculated_success_rate else background_success_rate
                     
                     analysis_result = {
                         'action': background_action,
-                        'confidence': background_confidence,
+                        'confidence': 70,  # ثقة متوسطة في التحليل الخلفي
+                        'success_rate': final_success_rate,  # نسبة النجاح الفعلية للصفقة
                         'reasoning': ['تحليل خلفي محسن بناءً على المؤشرات الفنية'],
                         'ai_analysis': 'تحليل خلفي تلقائي',
                         'source': 'تحليل خلفي محسن',
@@ -5619,7 +5648,7 @@ class GeminiAnalyzer:
                         'multi_tf_indicators': multi_tf_indicators
                     }
                     
-                    logger.info(f"[AUTO_BACKGROUND] تحليل خلفي للرمز {symbol}: {background_action} بثقة {background_confidence}%")
+                    logger.info(f"[AUTO_BACKGROUND] تحليل خلفي للرمز {symbol}: {background_action} بنسبة نجاح {final_success_rate:.1f}%")
                     return analysis_result
                 
 
@@ -10384,25 +10413,29 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
             return
         
         action = signal.get('action', 'BUY')  # تفضيل الإجراء على الانتظار
-        confidence = signal.get('confidence', 0)
         
-        # التأكد من أن confidence رقم صالح
-        if confidence is None or not isinstance(confidence, (int, float)):
-            confidence = 0
+        # استخراج نسبة النجاح الفعلية (احتمال فوز الصفقة) وثقة الـ AI منفصلة
+        success_rate = signal.get('success_rate', 0)  # نسبة النجاح الفعلية للصفقة
+        ai_confidence = signal.get('confidence', 75)  # ثقة الـ AI في التحليل
         
-        # حساب نسبة النجاح
-        if analysis:
+        # التأكد من أن success_rate رقم صالح
+        if success_rate is None or not isinstance(success_rate, (int, float)):
+            success_rate = 0
+        
+        # إذا لم تكن نسبة النجاح متوفرة، احسبها من التحليل
+        if success_rate <= 0 and analysis:
             success_rate = calculate_dynamic_success_rate(analysis, 'trading_signal')
             if success_rate is None or success_rate <= 0:
-                success_rate = max(confidence, 65.0) if confidence > 0 else 65.0
-        else:
-            success_rate = max(confidence, 65.0) if confidence > 0 else 65.0
+                # كـ fallback، استخدم الثقة أو قيمة افتراضية
+                success_rate = max(ai_confidence, 65.0) if ai_confidence > 0 else 65.0
+        elif success_rate <= 0:
+            success_rate = 65.0  # قيمة افتراضية
         
         # التحقق من عتبة النجاح - القيمة الافتراضية 0 (لا فلترة)
         min_threshold = settings.get('success_threshold', 0)
-        logger.debug(f"[DEBUG] نسبة النجاح {success_rate:.1f}% مقابل العتبة {min_threshold}%")
+        logger.debug(f"[DEBUG] نسبة النجاح {success_rate:.1f}% مقابل العتبة {min_threshold}% (ثقة AI: {ai_confidence}%)")
         if min_threshold > 0 and success_rate < min_threshold:
-            logger.debug(f"[DEBUG] نسبة النجاح أقل من العتبة المطلوبة للمستخدم {user_id}")
+            logger.debug(f"[DEBUG] نسبة النجاح ({success_rate:.1f}%) أقل من العتبة المطلوبة ({min_threshold}%) للمستخدم {user_id}")
             return
         
         # جلب معلومات نمط التداول (بدون شروط إضافية - فقط لحساب حجم الصفقة)
@@ -14885,18 +14918,21 @@ def monitoring_loop():
                                 successful_operations += 1  # العملية نجحت لكن ليس الوقت المناسب
                                 continue
                             
-                            # إرسال التنبيه إذا كانت هناك إشارة قوية
-                            analysis_confidence = analysis.get('confidence', 0)
-                            logger.debug(f"[NOTIFICATION_CHECK] {symbol} للمستخدم {user_id}: الثقة={analysis_confidence}%, العتبة={min_confidence}%")
+                            # إرسال التنبيه إذا كانت هناك نسبة نجاح عالية
+                            analysis_success_rate = analysis.get('success_rate', analysis.get('confidence', 0))  # استخدم نسبة النجاح أو الثقة كـ fallback
+                            analysis_confidence = analysis.get('confidence', 75)  # ثقة الـ AI منفصلة
                             
-                            if analysis_confidence >= min_confidence:
+                            logger.debug(f"[NOTIFICATION_CHECK] {symbol} للمستخدم {user_id}: نسبة النجاح={analysis_success_rate}%, العتبة={min_confidence}%, ثقة AI={analysis_confidence}%")
+                            
+                            if analysis_success_rate >= min_confidence:
                                 signal = {
                                     'action': analysis.get('action', 'HOLD'),
-                                    'confidence': analysis_confidence,
+                                    'success_rate': analysis_success_rate,  # نسبة النجاح الفعلية للصفقة
+                                    'confidence': analysis_confidence,  # ثقة الـ AI في التحليل
                                     'reasoning': analysis.get('reasoning', [])
                                 }
                                 
-                                logger.info(f"[SENDING_NOTIFICATION] إرسال تنبيه {symbol} للمستخدم {user_id}: {signal['action']} بثقة {signal['confidence']}%")
+                                logger.info(f"[SENDING_NOTIFICATION] إرسال تنبيه {symbol} للمستخدم {user_id}: {signal['action']} بنسبة نجاح {signal['success_rate']}% (ثقة AI: {signal['confidence']}%)")
                                 
                                 try:
                                     send_trading_signal_alert(user_id, symbol, signal, analysis)
@@ -14906,7 +14942,7 @@ def monitoring_loop():
                                     logger.error(f"[ERROR] خطأ في إرسال تنبيه {symbol} للمستخدم {user_id}: {alert_error}")
                                     failed_operations += 1
                             else:
-                                logger.debug(f"[NOTIFICATION_SKIPPED] {symbol} للمستخدم {user_id}: الثقة ({analysis_confidence}%) أقل من العتبة ({min_confidence}%)")
+                                logger.debug(f"[NOTIFICATION_SKIPPED] {symbol} للمستخدم {user_id}: نسبة النجاح ({analysis_success_rate}%) أقل من العتبة ({min_confidence}%)")
                                 successful_operations += 1  # لا توجد إشارة قوية ولكن العملية نجحت
                                 
                         except Exception as user_error:
