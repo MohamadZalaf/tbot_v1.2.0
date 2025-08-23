@@ -5567,16 +5567,15 @@ class GeminiAnalyzer:
             analysis_text = self._analyze_with_full_manual_instructions(symbol, price_data, technical_data, user_id)
             
             if analysis_text:
-                # استخراج التوصية ونسبة الثقة ونسبة النجاح
+                # استخراج التوصية ونسبة النجاح فقط
                 recommendation = self._extract_recommendation(analysis_text)
-                confidence = self._extract_confidence(analysis_text)  # ثقة الـ AI في التحليل
                 success_rate = self._extract_success_rate_from_ai(analysis_text)  # احتمال نجاح الصفقة
                 
                 # إذا لم يتم العثور على نسبة نجاح، استخدم حساب ديناميكي
                 if success_rate is None:
                     # حساب نسبة النجاح بناءً على المؤشرات الفنية
                     success_rate = calculate_ai_success_rate(
-                        {'confidence': confidence}, 
+                        {}, 
                         technical_data, 
                         symbol, 
                         recommendation or 'HOLD', 
@@ -5592,14 +5591,12 @@ class GeminiAnalyzer:
                     enhanced_success_rate = (success_rate * 0.7 + background_success * 0.3) if success_rate else background_success
                     logger.info(f"[ENHANCED_SUCCESS] {symbol}: الأصلية={success_rate}%, المحسنة={enhanced_success_rate:.1f}%")
                 
-                # إنشاء كائن التحليل الكامل مع التفريق بين المفاهيم
-                final_confidence = confidence if confidence is not None else 75  # ثقة الـ AI
-                final_success_rate = enhanced_success_rate if enhanced_success_rate is not None else 65  # احتمال النجاح
+                # إنشاء كائن التحليل الكامل - نسبة النجاح فقط
+                final_success_rate = enhanced_success_rate if enhanced_success_rate is not None else 65
                 
                 analysis_result = {
                     'action': recommendation or 'HOLD',
-                    'confidence': final_confidence,  # ثقة الـ AI في التحليل
-                    'success_rate': final_success_rate,  # احتمال نجاح الصفقة (هذا المهم للمتداول!)
+                    'success_rate': final_success_rate,  # احتمال نجاح الصفقة
                     'reasoning': [analysis_text[:200] + "..."] if len(analysis_text) > 200 else [analysis_text],
                     'ai_analysis': analysis_text,
                     'source': 'Gemini AI (تحليل شامل آلي محسن)',
@@ -5607,11 +5604,11 @@ class GeminiAnalyzer:
                     'timestamp': datetime.now(),
                     'price_data': price_data,
                     'technical_data': technical_data,
-                    'background_analysis': background_analysis,  # إضافة التحليل الخلفي
-                    'multi_tf_indicators': multi_tf_indicators  # إضافة المؤشرات متعددة الإطارات
+                    'background_analysis': background_analysis,
+                    'multi_tf_indicators': multi_tf_indicators
                 }
                 
-                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بنسبة نجاح {final_success_rate:.1f}% (ثقة AI: {final_confidence}%)")
+                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بنسبة نجاح {final_success_rate:.1f}%")
                 return analysis_result
             else:
                 # في حالة فشل التحليل النصي، استخدم التحليل الخلفي فقط
@@ -5635,7 +5632,6 @@ class GeminiAnalyzer:
                     
                     analysis_result = {
                         'action': background_action,
-                        'confidence': 70,  # ثقة متوسطة في التحليل الخلفي
                         'success_rate': final_success_rate,  # نسبة النجاح الفعلية للصفقة
                         'reasoning': ['تحليل خلفي محسن بناءً على المؤشرات الفنية'],
                         'ai_analysis': 'تحليل خلفي تلقائي',
@@ -5726,13 +5722,15 @@ class GeminiAnalyzer:
         **⚠️ مطلوب منك:**
         1. تحليل شامل ومفصل
         2. توصية واضحة (شراء/بيع/انتظار)
-        3. نسبة نجاح محسوبة بدقة (0-100%)
+        3. **نسبة نجاح الصفقة** محسوبة بدقة (احتمال فوز الصفقة إذا تم تنفيذها)
         4. مستويات دخول وأهداف ووقف خسارة
         5. تبرير مفصل للقرار
 
-        **تذكر:** يجب أن تنهي تحليلك بـ:
+        **🎯 CRITICAL - يجب أن تنهي تحليلك بـ:**
         "نسبة نجاح الصفقة: X%"
         "[success_rate]=X"
+        
+        **ملاحظة مهمة:** نسبة النجاح = احتمال أن تكون الصفقة رابحة (ليس ثقتك في التحليل)
         """
         
         return prompt
@@ -6451,7 +6449,8 @@ class GeminiAnalyzer:
             
             **🔢 الخطوة 4 - النتيجة النهائية:**
             - احسب: (النقاط الأساسية + نقاط المؤشرات) × المضاعف التراكمي
-            - النطاق النهائي: 5% إلى 98%
+            - النطاق النهائي: 5% إلى 95%
+            - **تذكر:** هذه نسبة نجاح الصفقة (احتمال الفوز) وليس ثقتك في التحليل
             - **أضف للنسبة إذا كان الـ Spread منخفضاً:** spread < 1 نقطة (+5%)
             - **تعلم من التقييمات السابقة:** إذا كان لديك تقييمات سلبية كثيرة لهذا الرمز، كن أكثر حذراً (-5 إلى -10%)
             - **استفد من الخبرة المجتمعية:** إذا كان المجتمع راضي عن تحليلاتك لهذا النوع، يمكن زيادة الثقة (+5%)
@@ -6987,7 +6986,7 @@ class GeminiAnalyzer:
                 found_rates.sort(key=lambda x: x[1], reverse=True)
                 best_rate = found_rates[0][0]
                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة النجاح المحسنة: {best_rate}% (نمط: {found_rates[0][2]})")
-                                    return apply_progressive_success_boost(best_rate)
+                return apply_progressive_success_boost(best_rate)
             
             # البحث الذكي في نهاية النص مع تحليل السياق
             text_end = text[-400:].lower()  # زيادة نطاق البحث
@@ -9817,92 +9816,26 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
                 elif bb_position == 'middle':  # السعر في المنتصف - حذر
                     base_success_rate -= 3
         
-        # تطبيق تعديلات إضافية من AI مع نظام تصاعدي محسن
+        # تطبيق تعديلات إضافية من AI إذا كانت متوفرة
         ai_confidence = analysis.get('confidence', 0)
         if ai_confidence and ai_confidence > 0:
-            # نظام تصاعدي قوي: كلما زادت نسبة الـ AI، كلما زادت المضاعفات بشكل أسي
-            ai_boost_factor = 1.0
-            progressive_bonus = 0
-            
-            if ai_confidence >= 90:
-                ai_boost_factor = 1.8  # مضاعف ضخم للنسب الخارقة
-                progressive_bonus = 15
-            elif ai_confidence >= 85:
-                ai_boost_factor = 1.7  # مضاعف كبير جداً للنسب الاستثنائية
-                progressive_bonus = 12
-            elif ai_confidence >= 80:
-                ai_boost_factor = 1.6  # مضاعف كبير للنسب العالية جداً
-                progressive_bonus = 10
-            elif ai_confidence >= 75:
-                ai_boost_factor = 1.5  # مضاعف جيد للنسب العالية
-                progressive_bonus = 8
-            elif ai_confidence >= 70:
-                ai_boost_factor = 1.4  # مضاعف متوسط-عالي
-                progressive_bonus = 6
-            elif ai_confidence >= 65:
-                ai_boost_factor = 1.3  # مضاعف متوسط-جيد
-                progressive_bonus = 4
-            elif ai_confidence >= 60:
-                ai_boost_factor = 1.2  # مضاعف متوسط
-                progressive_bonus = 2
-            elif ai_confidence >= 50:
-                ai_boost_factor = 1.1  # مضاعف خفيف
-                progressive_bonus = 1
-            
-            # تطبيق النظام التصاعدي المحسن
-            enhanced_ai_score = ai_confidence * ai_boost_factor + progressive_bonus
-            
-            # إضافة مكافأة أسية للنسب العالية جداً
-            if ai_confidence >= 75:
-                exponential_bonus = ((ai_confidence - 75) / 25) ** 2 * 10
-                enhanced_ai_score += exponential_bonus
-            
-            # دمج النتيجة مع وزن أكبر للـ AI (70% AI، 30% فني للنسب العالية)
-            ai_weight = 0.6 if ai_confidence < 70 else 0.7  # وزن أكبر للنسب العالية
-            technical_weight = 1 - ai_weight
-            
-            combined_rate = (base_success_rate * technical_weight) + (enhanced_ai_score * ai_weight)
+            # دمج تحليل AI مع التحليل الفني (وزن 70% فني، 30% AI)
+            combined_rate = (base_success_rate * 0.7) + (ai_confidence * 0.3)
             base_success_rate = combined_rate
-            
-            logger.info(f"[AI_PROGRESSIVE] تحسين تصاعدي بالـ AI: {ai_confidence}% → {enhanced_ai_score:.1f}% (عامل: {ai_boost_factor}x, مكافأة: +{progressive_bonus})")
         
-        # تطبيق تحسينات machine learning مع نظام تصاعدي
+        # تطبيق تحسينات machine learning من تقييمات المستخدمين
         if user_id:
             ml_adjustment = get_ml_adjustment_for_user(user_id, symbol, action)
-            
-            # تطبيق النظام التصاعدي على تحسينات ML
-            if ml_adjustment > 0:
-                # إذا كان التحسين إيجابي، طبق النظام التصاعدي
-                if base_success_rate >= 80:
-                    ml_adjustment *= 2.0  # مضاعفة التحسين للنسب العالية جداً
-                elif base_success_rate >= 70:
-                    ml_adjustment *= 1.7  # تحسين كبير للنسب العالية
-                elif base_success_rate >= 60:
-                    ml_adjustment *= 1.4  # تحسين متوسط
-                else:
-                    ml_adjustment *= 1.1  # تحسين خفيف للنسب المنخفضة
-            
             base_success_rate += ml_adjustment
             
-            # تحسينات إضافية بناءً على رأس المال مع نظام تصاعدي
+            # تحسينات إضافية بناءً على رأس المال
             capital = get_user_capital(user_id)
-            capital_bonus = 0
-            
-            if capital >= 50000:
-                capital_bonus = 5 if base_success_rate >= 70 else 3  # مكافأة أكبر للنسب العالية
-            elif capital >= 25000:
-                capital_bonus = 4 if base_success_rate >= 70 else 2
-            elif capital >= 10000:
-                capital_bonus = 3 if base_success_rate >= 70 else 1
+            if capital >= 10000:
+                base_success_rate += 2
             elif capital >= 5000:
-                capital_bonus = 2 if base_success_rate >= 70 else 1
+                base_success_rate += 1
             elif capital < 1000:
-                capital_bonus = -2 if base_success_rate < 50 else -1  # تقليل أقل للنسب العالية
-            
-            base_success_rate += capital_bonus
-            
-            if ml_adjustment != 0 or capital_bonus != 0:
-                logger.debug(f"[ML_PROGRESSIVE] تحسين ML تصاعدي: {ml_adjustment:.1f}, مكافأة رأس المال: {capital_bonus}")
+                base_success_rate -= 1
         
         # ضمان النطاق 5-95%
         final_score = max(5, min(95, base_success_rate))
@@ -10457,9 +10390,8 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
         
         action = signal.get('action', 'BUY')  # تفضيل الإجراء على الانتظار
         
-        # استخراج نسبة النجاح الفعلية (احتمال فوز الصفقة) وثقة الـ AI منفصلة
-        success_rate = signal.get('success_rate', 0)  # نسبة النجاح الفعلية للصفقة
-        ai_confidence = signal.get('confidence', 75)  # ثقة الـ AI في التحليل
+        # استخراج نسبة النجاح الفعلية (احتمال فوز الصفقة)
+        success_rate = signal.get('success_rate', 0)
         
         # التأكد من أن success_rate رقم صالح
         if success_rate is None or not isinstance(success_rate, (int, float)):
@@ -10469,14 +10401,13 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
         if success_rate <= 0 and analysis:
             success_rate = calculate_dynamic_success_rate(analysis, 'trading_signal')
             if success_rate is None or success_rate <= 0:
-                # كـ fallback، استخدم الثقة أو قيمة افتراضية
-                success_rate = max(ai_confidence, 65.0) if ai_confidence > 0 else 65.0
+                success_rate = 65.0  # قيمة افتراضية
         elif success_rate <= 0:
             success_rate = 65.0  # قيمة افتراضية
         
         # التحقق من عتبة النجاح - القيمة الافتراضية 0 (لا فلترة)
         min_threshold = settings.get('success_threshold', 0)
-        logger.debug(f"[DEBUG] نسبة النجاح {success_rate:.1f}% مقابل العتبة {min_threshold}% (ثقة AI: {ai_confidence}%)")
+        logger.debug(f"[DEBUG] نسبة النجاح {success_rate:.1f}% مقابل العتبة {min_threshold}%")
         if min_threshold > 0 and success_rate < min_threshold:
             logger.debug(f"[DEBUG] نسبة النجاح ({success_rate:.1f}%) أقل من العتبة المطلوبة ({min_threshold}%) للمستخدم {user_id}")
             return
@@ -14962,20 +14893,18 @@ def monitoring_loop():
                                 continue
                             
                             # إرسال التنبيه إذا كانت هناك نسبة نجاح عالية
-                            analysis_success_rate = analysis.get('success_rate', analysis.get('confidence', 0))  # استخدم نسبة النجاح أو الثقة كـ fallback
-                            analysis_confidence = analysis.get('confidence', 75)  # ثقة الـ AI منفصلة
+                            analysis_success_rate = analysis.get('success_rate', 0)
                             
-                            logger.debug(f"[NOTIFICATION_CHECK] {symbol} للمستخدم {user_id}: نسبة النجاح={analysis_success_rate}%, العتبة={min_confidence}%, ثقة AI={analysis_confidence}%")
+                            logger.debug(f"[NOTIFICATION_CHECK] {symbol} للمستخدم {user_id}: نسبة النجاح={analysis_success_rate}%, العتبة={min_confidence}%")
                             
                             if analysis_success_rate >= min_confidence:
                                 signal = {
                                     'action': analysis.get('action', 'HOLD'),
                                     'success_rate': analysis_success_rate,  # نسبة النجاح الفعلية للصفقة
-                                    'confidence': analysis_confidence,  # ثقة الـ AI في التحليل
                                     'reasoning': analysis.get('reasoning', [])
                                 }
                                 
-                                logger.info(f"[SENDING_NOTIFICATION] إرسال تنبيه {symbol} للمستخدم {user_id}: {signal['action']} بنسبة نجاح {signal['success_rate']}% (ثقة AI: {signal['confidence']}%)")
+                                logger.info(f"[SENDING_NOTIFICATION] إرسال تنبيه {symbol} للمستخدم {user_id}: {signal['action']} بنسبة نجاح {signal['success_rate']}%")
                                 
                                 try:
                                     send_trading_signal_alert(user_id, symbol, signal, analysis)
