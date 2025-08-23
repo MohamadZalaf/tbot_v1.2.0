@@ -4972,7 +4972,7 @@ def calculate_comprehensive_indicators(df: pd.DataFrame, indicators: Dict, symbo
         logger.warning(f"[COMPREHENSIVE_INDICATORS] خطأ عام في حساب المؤشرات الشاملة للرمز {symbol} على إطار {tf_name}: {e}")
 
 def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict, multi_tf_indicators: Dict):
-    """إرسال رسالة منفصلة للمؤشرات الفنية متعددة الإطارات إذا كانت مفعلة"""
+    """إرسال رسائل منفصلة للمؤشرات الفنية متعددة الإطارات (4 رسائل لكل فريم) إذا كانت مفعلة"""
     try:
         # التحقق من تفعيل إرسال رسائل الإطارات
         if not SEND_FRAMES_MESSAGES:
@@ -4982,22 +4982,122 @@ def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict,
             logger.debug(f"[FRAMES_MSG] لا توجد مؤشرات متعددة الإطارات للرمز {symbol}")
             return
         
-        # تنسيق الرسالة
-        frames_message = format_multi_timeframe_indicators_message(symbol, symbol_info, multi_tf_indicators)
+        # إرسال رسالة منفصلة لكل إطار زمني
+        timeframe_names = {
+            'M5': '5 دقائق',
+            'M15': '15 دقيقة', 
+            'M30': '30 دقيقة',
+            'M60': '60 دقيقة'
+        }
         
-        # إرسال الرسالة
-        try:
-            bot.send_message(
-                chat_id=user_id,
-                text=frames_message,
-                parse_mode='Markdown'
-            )
-            logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات للمستخدم {user_id} للرمز {symbol}")
-        except Exception as send_error:
-            logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة مؤشرات الإطارات للمستخدم {user_id}: {send_error}")
+        success_count = 0
+        for tf_key, tf_name in timeframe_names.items():
+            try:
+                # تنسيق رسالة منفصلة لكل فريم
+                frame_message = format_single_timeframe_indicators_message(symbol, symbol_info, tf_key, tf_name, multi_tf_indicators.get(tf_key, {}))
+                
+                if frame_message:
+                    bot.send_message(
+                        chat_id=user_id,
+                        text=frame_message,
+                        parse_mode='Markdown'
+                    )
+                    success_count += 1
+                    # فاصل زمني قصير بين الرسائل لتجنب rate limiting
+                    time.sleep(0.5)
+                    
+            except Exception as send_error:
+                logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة إطار {tf_key} للمستخدم {user_id}: {send_error}")
+        
+        if success_count > 0:
+            logger.info(f"[FRAMES_MSG] تم إرسال {success_count}/4 رسائل مؤشرات الإطارات للمستخدم {user_id} للرمز {symbol}")
+        else:
+            logger.warning(f"[FRAMES_MSG] فشل في إرسال جميع رسائل المؤشرات للمستخدم {user_id}")
             
     except Exception as e:
         logger.error(f"[FRAMES_MSG] خطأ في إرسال رسالة مؤشرات الإطارات: {e}")
+
+def format_single_timeframe_indicators_message(symbol: str, symbol_info: Dict, tf_key: str, tf_name: str, tf_data: Dict) -> str:
+    """تنسيق رسالة مؤشرات إطار زمني واحد"""
+    try:
+        if not tf_data or not tf_data.get('indicators'):
+            return f"📊 **{tf_name} - {symbol_info['name']} {symbol_info['emoji']}**\n\n❌ لا توجد مؤشرات متوفرة لهذا الإطار"
+        
+        indicators = tf_data.get('indicators', {})
+        message = f"📊 **{tf_name} - {symbol_info['name']} {symbol_info['emoji']}**\n\n"
+        
+        # 📈 TREND (الاتجاه)
+        message += "📈 **الاتجاه (TREND)**\n"
+        
+        # Moving Averages
+        ma9 = indicators.get('ma_9')
+        ma21 = indicators.get('ma_21')
+        ma50 = indicators.get('ma_50')
+        ema12 = indicators.get('ema_12')
+        ema26 = indicators.get('ema_26')
+        
+        if ma9 is not None:
+            message += f"• MA(9): {ma9:.5f}\n"
+        if ma21 is not None:
+            message += f"• MA(21): {ma21:.5f}\n"
+        if ma50 is not None:
+            message += f"• MA(50): {ma50:.5f}\n"
+        if ema12 is not None:
+            message += f"• EMA(12): {ema12:.5f}\n"
+        if ema26 is not None:
+            message += f"• EMA(26): {ema26:.5f}\n"
+        
+        # Bollinger Bands
+        bb_upper = indicators.get('bb_upper')
+        bb_middle = indicators.get('bb_middle')
+        bb_lower = indicators.get('bb_lower')
+        if bb_upper is not None and bb_lower is not None:
+            message += f"• BB Upper: {bb_upper:.5f}\n"
+            message += f"• BB Middle: {bb_middle:.5f}\n"
+            message += f"• BB Lower: {bb_lower:.5f}\n"
+        
+        # 📊 MOMENTUM (الزخم)
+        message += "\n📊 **الزخم (MOMENTUM)**\n"
+        
+        rsi = indicators.get('rsi')
+        if rsi is not None:
+            message += f"• RSI: {rsi:.2f}\n"
+        
+        # MACD
+        macd_data = indicators.get('macd', {})
+        if macd_data:
+            message += f"• MACD: {macd_data.get('macd', 0):.5f}\n"
+            message += f"• Signal: {macd_data.get('signal', 0):.5f}\n"
+            message += f"• Histogram: {macd_data.get('histogram', 0):.5f}\n"
+        
+        # Stochastic
+        stoch_k = indicators.get('stoch_k')
+        stoch_d = indicators.get('stoch_d')
+        if stoch_k is not None and stoch_d is not None:
+            message += f"• Stoch %K: {stoch_k:.2f}\n"
+            message += f"• Stoch %D: {stoch_d:.2f}\n"
+        
+        # 📉 VOLUME & VOLATILITY
+        message += "\n📉 **الحجم والتقلبات**\n"
+        
+        volume_ratio = indicators.get('volume_ratio')
+        if volume_ratio is not None:
+            message += f"• Volume Ratio: {volume_ratio:.2f}x\n"
+        
+        atr = indicators.get('atr')
+        if atr is not None:
+            message += f"• ATR: {atr:.5f}\n"
+        
+        # الاتجاه العام
+        trend = indicators.get('trend', 'غير محدد')
+        trend_strength = indicators.get('trend_strength', 'غير محدد')
+        message += f"\n🎯 **الاتجاه العام:** {trend} ({trend_strength})\n"
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"[SINGLE_FRAME_FORMAT] خطأ في تنسيق رسالة الإطار {tf_key}: {e}")
+        return f"📊 **{tf_name} - {symbol}**\n\n❌ خطأ في تحضير البيانات"
 
 def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, multi_tf_indicators: Dict) -> str:
     """تنسيق رسالة المؤشرات الفنية متعددة الإطارات - شاملة ومصنفة"""
@@ -5447,12 +5547,20 @@ class GeminiAnalyzer:
             # جلب المؤشرات الفنية الكاملة
             technical_data = mt5_manager.calculate_technical_indicators(symbol)
             
+            # حساب المؤشرات متعددة الإطارات أولاً
+            multi_tf_indicators = None
+            try:
+                logger.info(f"[COMPREHENSIVE_MTI] حساب المؤشرات متعددة الإطارات للرمز {symbol}")
+                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+            except Exception as mti_error:
+                logger.error(f"[COMPREHENSIVE_MTI] خطأ في حساب المؤشرات متعددة الإطارات: {mti_error}")
+            
             # تحليل شامل في الخلفية لجميع البيانات (كما طلب المستخدم)
             background_analysis = self._perform_enhanced_background_analysis(symbol, price_data, technical_data, user_id)
             
             # حفظ المؤشرات المتعددة الإطارات مع التحليل
             analysis_result = background_analysis
-            if isinstance(analysis_result, dict):
+            if isinstance(analysis_result, dict) and multi_tf_indicators:
                 analysis_result['multi_tf_indicators'] = multi_tf_indicators
             
             # استخدام نفس دالة التحليل الشامل المستخدمة في الوضع اليدوي
@@ -5471,10 +5579,11 @@ class GeminiAnalyzer:
                     enhanced_confidence = (confidence * 0.7 + background_confidence * 0.3) if confidence else background_confidence
                     logger.info(f"[ENHANCED_CONFIDENCE] {symbol}: الأصلية={confidence}%, المحسنة={enhanced_confidence:.1f}%")
                 
-                # إنشاء كائن التحليل الكامل مع التحسينات الخلفية
+                # إنشاء كائج التحليل الكامل مع التحسينات الخلفية
+                final_confidence = enhanced_confidence if enhanced_confidence is not None else 50
                 analysis_result = {
                     'action': recommendation or 'HOLD',
-                    'confidence': enhanced_confidence if enhanced_confidence is not None else 50,
+                    'confidence': final_confidence,
                     'reasoning': [analysis_text[:200] + "..."] if len(analysis_text) > 200 else [analysis_text],
                     'ai_analysis': analysis_text,
                     'source': 'Gemini AI (تحليل شامل آلي محسن)',
@@ -5482,29 +5591,38 @@ class GeminiAnalyzer:
                     'timestamp': datetime.now(),
                     'price_data': price_data,
                     'technical_data': technical_data,
-                    'background_analysis': background_analysis  # إضافة التحليل الخلفي
+                    'background_analysis': background_analysis,  # إضافة التحليل الخلفي
+                    'multi_tf_indicators': multi_tf_indicators  # إضافة المؤشرات متعددة الإطارات
                 }
                 
-                # استخراج قيم إضافية من التحليل
-                try:
-                    entry_price_ai, target1_ai, target2_ai, stop_loss_ai, risk_reward_ai = self._extract_trading_levels(analysis_text, price_data.get('last', 0))
-                    target1_points_ai, target2_points_ai, stop_points_ai = self._extract_points_from_ai(analysis_text)
-                    
-                    analysis_result.update({
-                        'entry_price': entry_price_ai,
-                        'target1': target1_ai,
-                        'target2': target2_ai,
-                        'stop_loss': stop_loss_ai,
-                        'risk_reward': risk_reward_ai,
-                        'target1_points': target1_points_ai,
-                        'target2_points': target2_points_ai,
-                        'stop_points': stop_points_ai
-                    })
-                except Exception as e:
-                    logger.debug(f"[AUTO_LEVELS] خطأ في استخراج المستويات: {e}")
-                
-                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بثقة {confidence}%")
+                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بثقة {final_confidence}%")
                 return analysis_result
+            else:
+                # في حالة فشل التحليل النصي، استخدم التحليل الخلفي فقط
+                logger.warning(f"[AUTO_COMPREHENSIVE] فشل في التحليل النصي للرمز {symbol} - استخدام التحليل الخلفي")
+                
+                if background_analysis and isinstance(background_analysis, dict):
+                    background_confidence = background_analysis.get('enhanced_confidence', 65)
+                    background_action = background_analysis.get('recommendation', 'HOLD')
+                    
+                    analysis_result = {
+                        'action': background_action,
+                        'confidence': background_confidence,
+                        'reasoning': ['تحليل خلفي محسن بناءً على المؤشرات الفنية'],
+                        'ai_analysis': 'تحليل خلفي تلقائي',
+                        'source': 'تحليل خلفي محسن',
+                        'symbol': symbol,
+                        'timestamp': datetime.now(),
+                        'price_data': price_data,
+                        'technical_data': technical_data,
+                        'background_analysis': background_analysis,
+                        'multi_tf_indicators': multi_tf_indicators
+                    }
+                    
+                    logger.info(f"[AUTO_BACKGROUND] تحليل خلفي للرمز {symbol}: {background_action} بثقة {background_confidence}%")
+                    return analysis_result
+                
+
             
         except Exception as e:
             logger.error(f"[AUTO_COMPREHENSIVE_ERROR] خطأ في التحليل الشامل للرمز {symbol}: {e}")
@@ -14768,20 +14886,27 @@ def monitoring_loop():
                                 continue
                             
                             # إرسال التنبيه إذا كانت هناك إشارة قوية
-                            if analysis.get('confidence', 0) >= min_confidence:
+                            analysis_confidence = analysis.get('confidence', 0)
+                            logger.debug(f"[NOTIFICATION_CHECK] {symbol} للمستخدم {user_id}: الثقة={analysis_confidence}%, العتبة={min_confidence}%")
+                            
+                            if analysis_confidence >= min_confidence:
                                 signal = {
                                     'action': analysis.get('action', 'HOLD'),
-                                    'confidence': analysis.get('confidence', 0),
+                                    'confidence': analysis_confidence,
                                     'reasoning': analysis.get('reasoning', [])
                                 }
+                                
+                                logger.info(f"[SENDING_NOTIFICATION] إرسال تنبيه {symbol} للمستخدم {user_id}: {signal['action']} بثقة {signal['confidence']}%")
                                 
                                 try:
                                     send_trading_signal_alert(user_id, symbol, signal, analysis)
                                     successful_operations += 1
+                                    logger.info(f"[NOTIFICATION_SENT] تم إرسال تنبيه {symbol} للمستخدم {user_id} بنجاح")
                                 except Exception as alert_error:
                                     logger.error(f"[ERROR] خطأ في إرسال تنبيه {symbol} للمستخدم {user_id}: {alert_error}")
                                     failed_operations += 1
                             else:
+                                logger.debug(f"[NOTIFICATION_SKIPPED] {symbol} للمستخدم {user_id}: الثقة ({analysis_confidence}%) أقل من العتبة ({min_confidence}%)")
                                 successful_operations += 1  # لا توجد إشارة قوية ولكن العملية نجحت
                                 
                         except Exception as user_error:
