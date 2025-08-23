@@ -4522,6 +4522,13 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
                     logger.warning(f"[WARNING] فشل في حساب ATR للرمز {symbol} على إطار {tf_name}: {e}")
                     indicators['atr'] = None
                 
+                # ================ حساب جميع المؤشرات الشاملة ================
+                try:
+                    # إضافة المؤشرات الشاملة اللحظية
+                    calculate_comprehensive_indicators(df, indicators, symbol, tf_name)
+                except Exception as e:
+                    logger.warning(f"[WARNING] فشل في حساب بعض المؤشرات الشاملة للرمز {symbol} على إطار {tf_name}: {e}")
+                
                 # Volume Analysis - محسن للبيانات اللحظية
                 try:
                     if 'tick_volume' in df.columns and len(df) > 0:
@@ -4620,6 +4627,349 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
         logger.error(f"[ERROR] خطأ عام في حساب المؤشرات متعددة الإطارات للرمز {symbol}: {e}")
         return {}
 
+def calculate_comprehensive_indicators(df: pd.DataFrame, indicators: Dict, symbol: str, tf_name: str):
+    """حساب جميع المؤشرات الشاملة مع القيم اللحظية للشمعة غير المكتملة"""
+    try:
+        import ta
+        import numpy as np
+        
+        if len(df) < 14:
+            return
+        
+        # 📈 TREND INDICATORS (مؤشرات الاتجاه)
+        
+        # Additional Moving Averages
+        try:
+            for period in [50]:
+                if len(df) >= period:
+                    ma = df['close'].rolling(window=period).mean()
+                    current_ma = ma.iloc[-1] if not ma.empty else None
+                    if current_ma and not pd.isna(current_ma):
+                        indicators[f'ma_{period}'] = round(float(current_ma), 5)
+            
+            # EMAs
+            for period in [12, 26]:
+                if len(df) >= period:
+                    ema = df['close'].ewm(span=period, adjust=False).mean()
+                    current_ema = ema.iloc[-1] if not ema.empty else None
+                    if current_ema and not pd.isna(current_ema):
+                        indicators[f'ema_{period}'] = round(float(current_ema), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في المتوسطات المتحركة الإضافية: {e}")
+        
+        # Bollinger Bands
+        try:
+            if len(df) >= 20:
+                bb_indicator = ta.volatility.BollingerBands(close=df['close'], window=20, window_dev=2)
+                bb_upper = bb_indicator.bollinger_hband().iloc[-1]
+                bb_middle = bb_indicator.bollinger_mavg().iloc[-1]
+                bb_lower = bb_indicator.bollinger_lband().iloc[-1]
+                bb_width = bb_indicator.bollinger_wband().iloc[-1]
+                
+                if not pd.isna(bb_upper) and not pd.isna(bb_lower):
+                    indicators['bb_upper'] = round(float(bb_upper), 5)
+                    indicators['bb_middle'] = round(float(bb_middle), 5)
+                    indicators['bb_lower'] = round(float(bb_lower), 5)
+                    indicators['bb_width'] = round(float(bb_width), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Bollinger Bands: {e}")
+        
+        # Parabolic SAR
+        try:
+            if len(df) >= 20:
+                sar_indicator = ta.trend.PSARIndicator(high=df['high'], low=df['low'], close=df['close'])
+                sar = sar_indicator.psar().iloc[-1]
+                if not pd.isna(sar):
+                    indicators['sar'] = round(float(sar), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Parabolic SAR: {e}")
+        
+        # Standard Deviation
+        try:
+            if len(df) >= 20:
+                std_dev = df['close'].rolling(window=20).std().iloc[-1]
+                if not pd.isna(std_dev):
+                    indicators['std_dev'] = round(float(std_dev), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Standard Deviation: {e}")
+        
+        # Envelopes (Moving Average ± percentage)
+        try:
+            if len(df) >= 20:
+                ma_20 = df['close'].rolling(window=20).mean().iloc[-1]
+                if not pd.isna(ma_20):
+                    env_percent = 0.025  # 2.5%
+                    indicators['env_upper'] = round(float(ma_20 * (1 + env_percent)), 5)
+                    indicators['env_lower'] = round(float(ma_20 * (1 - env_percent)), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Envelopes: {e}")
+        
+        # Ichimoku Kinko Hyo
+        try:
+            if len(df) >= 52:
+                ichimoku_indicator = ta.trend.IchimokuIndicator(high=df['high'], low=df['low'])
+                tenkan = ichimoku_indicator.ichimoku_conversion_line().iloc[-1]
+                kijun = ichimoku_indicator.ichimoku_base_line().iloc[-1]
+                chikou = df['close'].iloc[-26] if len(df) > 26 else df['close'].iloc[-1]
+                
+                ichimoku_data = {}
+                if not pd.isna(tenkan):
+                    ichimoku_data['tenkan_sen'] = round(float(tenkan), 5)
+                if not pd.isna(kijun):
+                    ichimoku_data['kijun_sen'] = round(float(kijun), 5)
+                if not pd.isna(chikou):
+                    ichimoku_data['chikou_span'] = round(float(chikou), 5)
+                
+                if ichimoku_data:
+                    indicators['ichimoku'] = ichimoku_data
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Ichimoku: {e}")
+        
+        # Average Directional Movement Index (ADX)
+        try:
+            if len(df) >= 14:
+                adx_indicator = ta.trend.ADXIndicator(high=df['high'], low=df['low'], close=df['close'])
+                adx = adx_indicator.adx().iloc[-1]
+                if not pd.isna(adx):
+                    indicators['adx'] = round(float(adx), 2)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في ADX: {e}")
+        
+        # 🔄 OSCILLATORS (المذبذبات)
+        
+        # Williams' Percent Range
+        try:
+            if len(df) >= 14:
+                williams_r = ta.momentum.WilliamsRIndicator(high=df['high'], low=df['low'], close=df['close']).williams_r().iloc[-1]
+                if not pd.isna(williams_r):
+                    indicators['williams_r'] = round(float(williams_r), 2)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Williams %R: {e}")
+        
+        # Commodity Channel Index
+        try:
+            if len(df) >= 20:
+                cci = ta.trend.CCIIndicator(high=df['high'], low=df['low'], close=df['close']).cci().iloc[-1]
+                if not pd.isna(cci):
+                    indicators['cci'] = round(float(cci), 2)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في CCI: {e}")
+        
+        # Momentum
+        try:
+            if len(df) >= 14:
+                momentum = df['close'].iloc[-1] / df['close'].iloc[-14] if df['close'].iloc[-14] != 0 else 1
+                indicators['momentum'] = round(float(momentum), 4)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Momentum: {e}")
+        
+        # DeMarker
+        try:
+            if len(df) >= 14:
+                # تنفيذ مبسط للـ DeMarker
+                high_diff = df['high'].diff()
+                low_diff = df['low'].diff()
+                
+                demax = high_diff.where(high_diff > 0, 0)
+                demin = low_diff.abs().where(low_diff < 0, 0)
+                
+                sma_demax = demax.rolling(window=14).mean()
+                sma_demin = demin.rolling(window=14).mean()
+                
+                demarker = sma_demax / (sma_demax + sma_demin)
+                current_demarker = demarker.iloc[-1]
+                
+                if not pd.isna(current_demarker):
+                    indicators['demarker'] = round(float(current_demarker), 4)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في DeMarker: {e}")
+        
+        # Force Index
+        try:
+            if len(df) >= 2:
+                force_index = ta.volume.VolumePriceTrendIndicator(close=df['close'], volume=df['tick_volume']).volume_price_trend().iloc[-1]
+                if not pd.isna(force_index):
+                    indicators['force_index'] = round(float(force_index), 2)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Force Index: {e}")
+        
+        # Moving Average of Oscillator (OSMA)
+        try:
+            if 'macd' in indicators and indicators['macd']:
+                macd_val = indicators['macd']['macd']
+                signal_val = indicators['macd']['signal']
+                if macd_val is not None and signal_val is not None:
+                    osma = macd_val - signal_val
+                    indicators['osma'] = round(float(osma), 6)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في OSMA: {e}")
+        
+        # Relative Vigor Index
+        try:
+            if len(df) >= 10:
+                # تنفيذ مبسط للـ RVI
+                close_open = df['close'] - df['open']
+                high_low = df['high'] - df['low']
+                
+                rvi_numerator = close_open.rolling(window=10).mean()
+                rvi_denominator = high_low.rolling(window=10).mean()
+                
+                rvi = rvi_numerator / rvi_denominator.where(rvi_denominator != 0, 1)
+                current_rvi = rvi.iloc[-1]
+                
+                if not pd.isna(current_rvi):
+                    indicators['rvi'] = round(float(current_rvi), 4)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في RVI: {e}")
+        
+        # Bears Power and Bulls Power
+        try:
+            if len(df) >= 13:
+                ema_13 = df['close'].ewm(span=13).mean()
+                bears_power = (df['low'] - ema_13).iloc[-1]
+                bulls_power = (df['high'] - ema_13).iloc[-1]
+                
+                if not pd.isna(bears_power):
+                    indicators['bears_power'] = round(float(bears_power), 5)
+                if not pd.isna(bulls_power):
+                    indicators['bulls_power'] = round(float(bulls_power), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Bears/Bulls Power: {e}")
+        
+        # 📊 VOLUMES (أحجام التداول)
+        
+        # On Balance Volume
+        try:
+            if len(df) >= 20:
+                obv = ta.volume.OnBalanceVolumeIndicator(close=df['close'], volume=df['tick_volume']).on_balance_volume().iloc[-1]
+                if not pd.isna(obv):
+                    indicators['obv'] = round(float(obv), 0)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في OBV: {e}")
+        
+        # Accumulation/Distribution
+        try:
+            if len(df) >= 20:
+                ad = ta.volume.AccDistIndexIndicator(high=df['high'], low=df['low'], close=df['close'], volume=df['tick_volume']).acc_dist_index().iloc[-1]
+                if not pd.isna(ad):
+                    indicators['ad'] = round(float(ad), 0)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في A/D: {e}")
+        
+        # Money Flow Index
+        try:
+            if len(df) >= 14:
+                mfi = ta.volume.MFIIndicator(high=df['high'], low=df['low'], close=df['close'], volume=df['tick_volume']).money_flow_index().iloc[-1]
+                if not pd.isna(mfi):
+                    indicators['mfi'] = round(float(mfi), 2)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في MFI: {e}")
+        
+        # 🧠 BILL WILLIAMS INDICATORS
+        
+        # Awesome Oscillator
+        try:
+            if len(df) >= 34:
+                ao = ta.momentum.AwesomeOscillatorIndicator(high=df['high'], low=df['low']).awesome_oscillator().iloc[-1]
+                if not pd.isna(ao):
+                    indicators['awesome_oscillator'] = round(float(ao), 6)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Awesome Oscillator: {e}")
+        
+        # Accelerator Oscillator
+        try:
+            if len(df) >= 34 and 'awesome_oscillator' in indicators:
+                # تنفيذ مبسط للـ AC
+                ac = ta.momentum.AwesomeOscillatorIndicator(high=df['high'], low=df['low']).awesome_oscillator()
+                ac_sma = ac.rolling(window=5).mean()
+                accelerator = (ac - ac_sma).iloc[-1]
+                
+                if not pd.isna(accelerator):
+                    indicators['accelerator_oscillator'] = round(float(accelerator), 6)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Accelerator Oscillator: {e}")
+        
+        # Alligator
+        try:
+            if len(df) >= 21:
+                # Alligator Lines
+                jaw = df['close'].rolling(window=13).mean().shift(8).iloc[-1]
+                teeth = df['close'].rolling(window=8).mean().shift(5).iloc[-1]
+                lips = df['close'].rolling(window=5).mean().shift(3).iloc[-1]
+                
+                alligator_data = {}
+                if not pd.isna(jaw):
+                    alligator_data['jaw'] = round(float(jaw), 5)
+                if not pd.isna(teeth):
+                    alligator_data['teeth'] = round(float(teeth), 5)
+                if not pd.isna(lips):
+                    alligator_data['lips'] = round(float(lips), 5)
+                
+                if alligator_data:
+                    indicators['alligator'] = alligator_data
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Alligator: {e}")
+        
+        # Gator Oscillator
+        try:
+            if 'alligator' in indicators and indicators['alligator']:
+                alligator = indicators['alligator']
+                jaw = alligator.get('jaw')
+                teeth = alligator.get('teeth')
+                lips = alligator.get('lips')
+                
+                if jaw and teeth and lips:
+                    gator_upper = abs(jaw - teeth)
+                    gator_lower = abs(teeth - lips)
+                    
+                    indicators['gator'] = {
+                        'upper': round(float(gator_upper), 5),
+                        'lower': round(float(gator_lower), 5)
+                    }
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Gator Oscillator: {e}")
+        
+        # Market Facilitation Index
+        try:
+            if len(df) >= 2:
+                # BW MFI = (High - Low) / Volume
+                if 'tick_volume' in df.columns:
+                    volume = df['tick_volume'].iloc[-1]
+                    if volume > 0:
+                        high_low_diff = df['high'].iloc[-1] - df['low'].iloc[-1]
+                        mfindex = high_low_diff / volume
+                        indicators['market_facilitation_index'] = round(float(mfindex), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Market Facilitation Index: {e}")
+        
+        # Fractals
+        try:
+            if len(df) >= 5:
+                # تنفيذ مبسط للـ Fractals
+                high_values = df['high'].values
+                low_values = df['low'].values
+                
+                # Up Fractal: high[i] > high[i-2] and high[i] > high[i-1] and high[i] > high[i+1] and high[i] > high[i+2]
+                # Down Fractal: low[i] < low[i-2] and low[i] < low[i-1] and low[i] < low[i+1] and low[i] < low[i+2]
+                
+                if len(high_values) >= 5:
+                    last_high = high_values[-3]  # -3 لأننا نحتاج نقطتين بعدها
+                    if (last_high > high_values[-5] and last_high > high_values[-4] and 
+                        last_high > high_values[-2] and last_high > high_values[-1]):
+                        indicators['fractals'] = indicators.get('fractals', {})
+                        indicators['fractals']['up'] = round(float(last_high), 5)
+                    
+                    last_low = low_values[-3]
+                    if (last_low < low_values[-5] and last_low < low_values[-4] and 
+                        last_low < low_values[-2] and last_low < low_values[-1]):
+                        indicators['fractals'] = indicators.get('fractals', {})
+                        indicators['fractals']['down'] = round(float(last_low), 5)
+        except Exception as e:
+            logger.debug(f"[INDICATORS] خطأ في Fractals: {e}")
+            
+    except Exception as e:
+        logger.warning(f"[COMPREHENSIVE_INDICATORS] خطأ عام في حساب المؤشرات الشاملة للرمز {symbol} على إطار {tf_name}: {e}")
+
 def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict, multi_tf_indicators: Dict):
     """إرسال رسالة منفصلة للمؤشرات الفنية متعددة الإطارات إذا كانت مفعلة"""
     try:
@@ -4649,9 +4999,9 @@ def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict,
         logger.error(f"[FRAMES_MSG] خطأ في إرسال رسالة مؤشرات الإطارات: {e}")
 
 def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, multi_tf_indicators: Dict) -> str:
-    """تنسيق رسالة المؤشرات الفنية متعددة الإطارات"""
+    """تنسيق رسالة المؤشرات الفنية متعددة الإطارات - شاملة ومصنفة"""
     try:
-        message = f"📊 **المؤشرات الفنية - {symbol_info['name']} {symbol_info['emoji']}**\n\n"
+        message = f"📊 **المؤشرات الفنية الشاملة - {symbol_info['name']} {symbol_info['emoji']}**\n\n"
         
         timeframe_names = {
             'M5': '5 دقائق',
@@ -4667,73 +5017,236 @@ def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, mu
             message += f"⏰ **{tf_name} Frame**\n\n"
             
             if indicators:
+                # 📈 TREND (الاتجاه)
+                message += "📈 **TREND (الاتجاه)**\n"
+                
+                # Moving Averages
+                ma9 = indicators.get('ma_9')
+                ma21 = indicators.get('ma_21')
+                ma50 = indicators.get('ma_50')
+                ema12 = indicators.get('ema_12')
+                ema26 = indicators.get('ema_26')
+                
+                if ma9 is not None:
+                    message += f"• Moving Average (9): {ma9:.5f}\n"
+                if ma21 is not None:
+                    message += f"• Moving Average (21): {ma21:.5f}\n"
+                if ma50 is not None:
+                    message += f"• Moving Average (50): {ma50:.5f}\n"
+                if ema12 is not None:
+                    message += f"• EMA (12): {ema12:.5f}\n"
+                if ema26 is not None:
+                    message += f"• EMA (26): {ema26:.5f}\n"
+                
+                # Bollinger Bands
+                bb_upper = indicators.get('bb_upper')
+                bb_middle = indicators.get('bb_middle')
+                bb_lower = indicators.get('bb_lower')
+                bb_width = indicators.get('bb_width')
+                if bb_upper is not None and bb_lower is not None:
+                    message += f"• Bollinger Bands: Upper={bb_upper:.5f}, Middle={bb_middle:.5f}, Lower={bb_lower:.5f}\n"
+                    if bb_width is not None:
+                        message += f"• BB Width: {bb_width:.5f}\n"
+                
+                # Parabolic SAR
+                sar = indicators.get('sar')
+                if sar is not None:
+                    message += f"• Parabolic SAR: {sar:.5f}\n"
+                
+                # Standard Deviation
+                std_dev = indicators.get('std_dev')
+                if std_dev is not None:
+                    message += f"• Standard Deviation: {std_dev:.5f}\n"
+                
+                # Envelopes
+                env_upper = indicators.get('env_upper')
+                env_lower = indicators.get('env_lower')
+                if env_upper is not None and env_lower is not None:
+                    message += f"• Envelopes: Upper={env_upper:.5f}, Lower={env_lower:.5f}\n"
+                
+                # Ichimoku
+                ichimoku = indicators.get('ichimoku', {})
+                if ichimoku:
+                    tenkan = ichimoku.get('tenkan_sen')
+                    kijun = ichimoku.get('kijun_sen')
+                    chikou = ichimoku.get('chikou_span')
+                    if tenkan is not None:
+                        message += f"• Ichimoku Tenkan-sen: {tenkan:.5f}\n"
+                    if kijun is not None:
+                        message += f"• Ichimoku Kijun-sen: {kijun:.5f}\n"
+                    if chikou is not None:
+                        message += f"• Ichimoku Chikou Span: {chikou:.5f}\n"
+                
+                # Average Directional Movement Index
+                adx = indicators.get('adx')
+                if adx is not None:
+                    message += f"• ADX: {adx:.2f}\n"
+                
+                message += "\n"
+                
+                # 🔄 OSCILLATORS (المذبذبات)
+                message += "🔄 **OSCILLATORS (المذبذبات)**\n"
+                
                 # RSI
                 rsi = indicators.get('rsi')
                 rsi_interpretation = indicators.get('rsi_interpretation', 'غير متوفر')
                 if rsi is not None:
-                    message += f"• RSI: {rsi:.1f} ({rsi_interpretation})\n"
-                else:
-                    message += f"• RSI: -- ({rsi_interpretation})\n"
+                    message += f"• Relative Strength Index: {rsi:.1f} ({rsi_interpretation})\n"
                 
                 # MACD
                 macd_data = indicators.get('macd', {})
                 macd_interpretation = indicators.get('macd_interpretation', 'غير متوفر')
                 if macd_data.get('macd') is not None:
-                    message += f"• MACD: {macd_data['macd']:.6f} ({macd_interpretation})\n"
-                else:
-                    message += f"• MACD: -- ({macd_interpretation})\n"
-                
-                # المتوسطات المتحركة
-                ma9 = indicators.get('ma_9')
-                ma21 = indicators.get('ma_21')
-                
-                if ma9 is not None:
-                    message += f"• MA9: {ma9:.5f}\n"
-                else:
-                    message += f"• MA9: --\n"
-                
-                if ma21 is not None:
-                    message += f"• MA21: {ma21:.5f}\n"
-                else:
-                    message += f"• MA21: --\n"
+                    message += f"• MACD: {macd_data['macd']:.6f}, Signal: {macd_data.get('signal', 0):.6f}, Histogram: {macd_data.get('histogram', 0):.6f} ({macd_interpretation})\n"
                 
                 # Stochastic
                 stochastic = indicators.get('stochastic', {})
                 stoch_interpretation = indicators.get('stochastic_interpretation', 'غير متوفر')
                 if stochastic.get('k') is not None and stochastic.get('d') is not None:
-                    message += f"• Stochastic %K: {stochastic['k']:.1f}, %D: {stochastic['d']:.1f} ({stoch_interpretation})\n"
-                else:
-                    message += f"• Stochastic: -- ({stoch_interpretation})\n"
+                    message += f"• Stochastic Oscillator: %K={stochastic['k']:.1f}, %D={stochastic['d']:.1f} ({stoch_interpretation})\n"
+                
+                # Williams' Percent Range
+                williams_r = indicators.get('williams_r')
+                if williams_r is not None:
+                    message += f"• Williams' Percent Range: {williams_r:.2f}\n"
+                
+                # Commodity Channel Index
+                cci = indicators.get('cci')
+                if cci is not None:
+                    message += f"• Commodity Channel Index: {cci:.2f}\n"
+                
+                # Momentum
+                momentum = indicators.get('momentum')
+                if momentum is not None:
+                    message += f"• Momentum: {momentum:.4f}\n"
+                
+                # DeMarker
+                demarker = indicators.get('demarker')
+                if demarker is not None:
+                    message += f"• DeMarker: {demarker:.4f}\n"
+                
+                # Force Index
+                force_index = indicators.get('force_index')
+                if force_index is not None:
+                    message += f"• Force Index: {force_index:.2f}\n"
+                
+                # Moving Average of Oscillator
+                osma = indicators.get('osma')
+                if osma is not None:
+                    message += f"• OSMA: {osma:.6f}\n"
+                
+                # Relative Vigor Index
+                rvi = indicators.get('rvi')
+                if rvi is not None:
+                    message += f"• Relative Vigor Index: {rvi:.4f}\n"
+                
+                # Bears Power
+                bears_power = indicators.get('bears_power')
+                if bears_power is not None:
+                    message += f"• Bears Power: {bears_power:.5f}\n"
+                
+                # Bulls Power
+                bulls_power = indicators.get('bulls_power')
+                if bulls_power is not None:
+                    message += f"• Bulls Power: {bulls_power:.5f}\n"
+                
+                message += "\n"
+                
+                # 📊 VOLUMES (أحجام التداول)
+                message += "📊 **VOLUMES (أحجام التداول)**\n"
+                
+                # الحجم الأساسي
+                current_volume = indicators.get('current_volume')
+                avg_volume = indicators.get('avg_volume')
+                volume_ratio = indicators.get('volume_ratio')
+                if current_volume is not None:
+                    message += f"• Volume: {current_volume:,}\n"
+                if avg_volume is not None:
+                    message += f"• Average Volume (20): {avg_volume:,}\n"
+                if volume_ratio is not None:
+                    message += f"• Volume Ratio: {volume_ratio:.2f}x\n"
+                
+                # On Balance Volume
+                obv = indicators.get('obv')
+                if obv is not None:
+                    message += f"• On Balance Volume: {obv:,.0f}\n"
+                
+                # Accumulation/Distribution
+                ad = indicators.get('ad')
+                if ad is not None:
+                    message += f"• Accumulation/Distribution: {ad:,.0f}\n"
+                
+                # Money Flow Index
+                mfi = indicators.get('mfi')
+                if mfi is not None:
+                    message += f"• Money Flow Index: {mfi:.2f}\n"
+                
+                message += "\n"
+                
+                # 🧠 BILL WILLIAMS (مؤشرات بيل ويليامز)
+                message += "🧠 **BILL WILLIAMS (مؤشرات بيل ويليامز)**\n"
+                
+                # Awesome Oscillator
+                ao = indicators.get('awesome_oscillator')
+                if ao is not None:
+                    message += f"• Awesome Oscillator: {ao:.6f}\n"
+                
+                # Accelerator Oscillator
+                ac = indicators.get('accelerator_oscillator')
+                if ac is not None:
+                    message += f"• Accelerator Oscillator: {ac:.6f}\n"
+                
+                # Alligator
+                alligator = indicators.get('alligator', {})
+                if alligator:
+                    jaw = alligator.get('jaw')
+                    teeth = alligator.get('teeth')
+                    lips = alligator.get('lips')
+                    if jaw is not None:
+                        message += f"• Alligator Jaw: {jaw:.5f}\n"
+                    if teeth is not None:
+                        message += f"• Alligator Teeth: {teeth:.5f}\n"
+                    if lips is not None:
+                        message += f"• Alligator Lips: {lips:.5f}\n"
+                
+                # Gator Oscillator
+                gator = indicators.get('gator', {})
+                if gator:
+                    upper = gator.get('upper')
+                    lower = gator.get('lower')
+                    if upper is not None:
+                        message += f"• Gator Upper: {upper:.5f}\n"
+                    if lower is not None:
+                        message += f"• Gator Lower: {lower:.5f}\n"
+                
+                # Market Facilitation Index
+                mfindex = indicators.get('market_facilitation_index')
+                if mfindex is not None:
+                    message += f"• Market Facilitation Index: {mfindex:.5f}\n"
+                
+                # Fractals
+                fractals = indicators.get('fractals', {})
+                if fractals:
+                    up_fractal = fractals.get('up')
+                    down_fractal = fractals.get('down')
+                    if up_fractal is not None:
+                        message += f"• Up Fractal: {up_fractal:.5f}\n"
+                    if down_fractal is not None:
+                        message += f"• Down Fractal: {down_fractal:.5f}\n"
+                
+                message += "\n"
+                
+                # 🔧 OTHER INDICATORS (مؤشرات أخرى)
+                message += "🔧 **OTHER INDICATORS (مؤشرات أخرى)**\n"
                 
                 # ATR
                 atr = indicators.get('atr')
                 if atr is not None:
-                    message += f"• ATR: {atr:.5f} (التقلبات)\n"
-                else:
-                    message += f"• ATR: -- (غير متوفر)\n"
+                    message += f"• Average True Range: {atr:.5f}\n"
                 
-                # Volume
-                current_volume = indicators.get('current_volume')
-                avg_volume = indicators.get('avg_volume')
-                volume_ratio = indicators.get('volume_ratio')
+                # Volume Analysis
                 volume_interpretation = indicators.get('volume_interpretation', 'غير متوفر')
                 activity_level = indicators.get('activity_level', '❓ غير محدد')
-                
-                if current_volume is not None:
-                    message += f"• الحجم الحالي: {current_volume:,}\n"
-                else:
-                    message += f"• الحجم الحالي: --\n"
-                
-                if avg_volume is not None:
-                    message += f"• متوسط الحجم (20): {avg_volume:,}\n"
-                else:
-                    message += f"• متوسط الحجم (20): --\n"
-                
-                if volume_ratio is not None:
-                    message += f"• نسبة الحجم: {volume_ratio:.2f}x\n"
-                else:
-                    message += f"• نسبة الحجم: --\n"
-                
                 message += f"• تحليل الحجم: {volume_interpretation}\n"
                 message += f"• مستوى النشاط: {activity_level}\n"
                 
@@ -4744,7 +5257,7 @@ def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, mu
         
         message += "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         message += f"🕐 **وقت التحديث:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        message += "📡 **المصدر:** MetaTrader5 (بيانات حقيقية)\n"
+        message += "📡 **المصدر:** MetaTrader5 (بيانات لحظية حقيقية)\n"
         
         return message
         
