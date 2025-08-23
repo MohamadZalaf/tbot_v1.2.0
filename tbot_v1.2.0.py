@@ -9817,41 +9817,92 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
                 elif bb_position == 'middle':  # السعر في المنتصف - حذر
                     base_success_rate -= 3
         
-        # تطبيق تعديلات إضافية من AI إذا كانت متوفرة - نظام محسن مع تركيز أكبر على AI
+        # تطبيق تعديلات إضافية من AI مع نظام تصاعدي محسن
         ai_confidence = analysis.get('confidence', 0)
         if ai_confidence and ai_confidence > 0:
-            # نظام نقاط تراكمي يعتمد على AI مع وزن أكبر (60% AI، 40% فني)
-            # كلما زادت نسبة الـ AI، كلما زادت النقاط التراكمية
+            # نظام تصاعدي قوي: كلما زادت نسبة الـ AI، كلما زادت المضاعفات بشكل أسي
             ai_boost_factor = 1.0
-            if ai_confidence >= 80:
-                ai_boost_factor = 1.4  # تحسين كبير للنسب العالية جداً
-            elif ai_confidence >= 70:
-                ai_boost_factor = 1.3  # تحسين جيد للنسب العالية
-            elif ai_confidence >= 60:
-                ai_boost_factor = 1.2  # تحسين متوسط للنسب الجيدة
-            elif ai_confidence >= 50:
-                ai_boost_factor = 1.1  # تحسين خفيف للنسب المتوسطة
+            progressive_bonus = 0
             
-            # تطبيق النظام التراكمي: AI له الوزن الأكبر + تحسين تراكمي
-            enhanced_ai_score = ai_confidence * ai_boost_factor
-            combined_rate = (base_success_rate * 0.4) + (enhanced_ai_score * 0.6)
+            if ai_confidence >= 90:
+                ai_boost_factor = 1.8  # مضاعف ضخم للنسب الخارقة
+                progressive_bonus = 15
+            elif ai_confidence >= 85:
+                ai_boost_factor = 1.7  # مضاعف كبير جداً للنسب الاستثنائية
+                progressive_bonus = 12
+            elif ai_confidence >= 80:
+                ai_boost_factor = 1.6  # مضاعف كبير للنسب العالية جداً
+                progressive_bonus = 10
+            elif ai_confidence >= 75:
+                ai_boost_factor = 1.5  # مضاعف جيد للنسب العالية
+                progressive_bonus = 8
+            elif ai_confidence >= 70:
+                ai_boost_factor = 1.4  # مضاعف متوسط-عالي
+                progressive_bonus = 6
+            elif ai_confidence >= 65:
+                ai_boost_factor = 1.3  # مضاعف متوسط-جيد
+                progressive_bonus = 4
+            elif ai_confidence >= 60:
+                ai_boost_factor = 1.2  # مضاعف متوسط
+                progressive_bonus = 2
+            elif ai_confidence >= 50:
+                ai_boost_factor = 1.1  # مضاعف خفيف
+                progressive_bonus = 1
+            
+            # تطبيق النظام التصاعدي المحسن
+            enhanced_ai_score = ai_confidence * ai_boost_factor + progressive_bonus
+            
+            # إضافة مكافأة أسية للنسب العالية جداً
+            if ai_confidence >= 75:
+                exponential_bonus = ((ai_confidence - 75) / 25) ** 2 * 10
+                enhanced_ai_score += exponential_bonus
+            
+            # دمج النتيجة مع وزن أكبر للـ AI (70% AI، 30% فني للنسب العالية)
+            ai_weight = 0.6 if ai_confidence < 70 else 0.7  # وزن أكبر للنسب العالية
+            technical_weight = 1 - ai_weight
+            
+            combined_rate = (base_success_rate * technical_weight) + (enhanced_ai_score * ai_weight)
             base_success_rate = combined_rate
             
-            logger.info(f"[AI_ENHANCED] تحسين النسبة بالـ AI: {ai_confidence}% → {enhanced_ai_score:.1f}% (عامل: {ai_boost_factor}x)")
+            logger.info(f"[AI_PROGRESSIVE] تحسين تصاعدي بالـ AI: {ai_confidence}% → {enhanced_ai_score:.1f}% (عامل: {ai_boost_factor}x, مكافأة: +{progressive_bonus})")
         
-        # تطبيق تحسينات machine learning من تقييمات المستخدمين
+        # تطبيق تحسينات machine learning مع نظام تصاعدي
         if user_id:
             ml_adjustment = get_ml_adjustment_for_user(user_id, symbol, action)
+            
+            # تطبيق النظام التصاعدي على تحسينات ML
+            if ml_adjustment > 0:
+                # إذا كان التحسين إيجابي، طبق النظام التصاعدي
+                if base_success_rate >= 80:
+                    ml_adjustment *= 2.0  # مضاعفة التحسين للنسب العالية جداً
+                elif base_success_rate >= 70:
+                    ml_adjustment *= 1.7  # تحسين كبير للنسب العالية
+                elif base_success_rate >= 60:
+                    ml_adjustment *= 1.4  # تحسين متوسط
+                else:
+                    ml_adjustment *= 1.1  # تحسين خفيف للنسب المنخفضة
+            
             base_success_rate += ml_adjustment
             
-            # تحسينات إضافية بناءً على رأس المال
+            # تحسينات إضافية بناءً على رأس المال مع نظام تصاعدي
             capital = get_user_capital(user_id)
-            if capital >= 10000:
-                base_success_rate += 2
+            capital_bonus = 0
+            
+            if capital >= 50000:
+                capital_bonus = 5 if base_success_rate >= 70 else 3  # مكافأة أكبر للنسب العالية
+            elif capital >= 25000:
+                capital_bonus = 4 if base_success_rate >= 70 else 2
+            elif capital >= 10000:
+                capital_bonus = 3 if base_success_rate >= 70 else 1
             elif capital >= 5000:
-                base_success_rate += 1
+                capital_bonus = 2 if base_success_rate >= 70 else 1
             elif capital < 1000:
-                base_success_rate -= 1
+                capital_bonus = -2 if base_success_rate < 50 else -1  # تقليل أقل للنسب العالية
+            
+            base_success_rate += capital_bonus
+            
+            if ml_adjustment != 0 or capital_bonus != 0:
+                logger.debug(f"[ML_PROGRESSIVE] تحسين ML تصاعدي: {ml_adjustment:.1f}, مكافأة رأس المال: {capital_bonus}")
         
         # ضمان النطاق 5-95%
         final_score = max(5, min(95, base_success_rate))
@@ -9883,14 +9934,13 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
             return apply_hidden_success_boost(base_rate)
 
 def apply_hidden_success_boost(original_rate: float) -> float:
-    """تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم) - محسن للتنويع الحقيقي"""
+    """تطبيق تحسين تصاعدي لنسبة النجاح - كلما كانت أعلى كلما زدنا عليها أكثر (نظام الجمع التصاعدي)"""
     import random
     import time
     import hashlib
     import os
     
-    # إنشاء seed عشوائي حقيقي بدلاً من الاعتماد على الوقت فقط
-    # دمج عوامل متعددة لضمان التنويع الحقيقي
+    # إنشاء seed عشوائي حقيقي
     time_factor = int(time.time() * 1000000)  # دقة أعلى بالميكروثانية
     process_factor = os.getpid()  # معرف العملية
     memory_factor = id(original_rate)  # عنوان الذاكرة للمتغير
@@ -9902,35 +9952,70 @@ def apply_hidden_success_boost(original_rate: float) -> float:
     
     random.seed(seed_value)
     
-    # تحديد نطاقات متنوعة أكثر مع تحسين التوزيع
-    if original_rate < 40:
-        random_boost = random.uniform(5, 18)   # نطاق أوسع للنسب المنخفضة
+    # ===== نظام الجمع التصاعدي =====
+    # كلما كانت النسبة أعلى، كلما أضفنا لها رقم أكبر
+    
+    if original_rate < 30:
+        # نسب منخفضة جداً: إضافة صغيرة
+        base_boost = random.uniform(3, 8)
+        progressive_bonus = 0
+    elif original_rate < 40:
+        # نسب منخفضة: إضافة متوسطة
+        base_boost = random.uniform(5, 12)
+        progressive_bonus = 2
     elif original_rate < 50:
-        random_boost = random.uniform(8, 22)   # نطاق متغير للنسب المنخفضة-متوسطة
+        # نسب متوسطة منخفضة: إضافة جيدة
+        base_boost = random.uniform(8, 15)
+        progressive_bonus = 4
     elif original_rate < 60:
-        random_boost = random.uniform(6, 20)   # نطاق متغير متوسط
+        # نسب متوسطة: إضافة أكبر
+        base_boost = random.uniform(10, 18)
+        progressive_bonus = 6
     elif original_rate < 70:
-        random_boost = random.uniform(4, 18)   # نطاق متغير متوسط-عالي
+        # نسب جيدة: إضافة كبيرة (بداية التصاعد القوي)
+        base_boost = random.uniform(12, 22)
+        progressive_bonus = 8
+    elif original_rate < 75:
+        # نسب عالية: إضافة أكبر بشكل تصاعدي
+        base_boost = random.uniform(15, 25)
+        progressive_bonus = 10
     elif original_rate < 80:
-        random_boost = random.uniform(2, 15)   # نطاق أقل للنسب العالية
+        # نسب عالية جداً: إضافة كبيرة تصاعدية
+        base_boost = random.uniform(18, 28)
+        progressive_bonus = 12
+    elif original_rate < 85:
+        # نسب ممتازة: إضافة ضخمة تصاعدية
+        base_boost = random.uniform(20, 32)
+        progressive_bonus = 15
     elif original_rate < 90:
-        random_boost = random.uniform(-2, 12)  # إمكانية تقليل أو زيادة للنسب العالية جداً
+        # نسب استثنائية: إضافة هائلة تصاعدية
+        base_boost = random.uniform(22, 35)
+        progressive_bonus = 18
     else:
-        random_boost = random.uniform(-5, 8)   # تحسين أقل أو تقليل للنسب العالية جداً
+        # نسب خارقة: أقصى إضافة تصاعدية
+        base_boost = random.uniform(25, 40)
+        progressive_bonus = 22
     
-    # إضافة عامل عشوائي إضافي للتنويع الحقيقي
-    variability_factor = random.uniform(-4, 4)
-    final_boost = random_boost + variability_factor
+    # حساب المكافأة التصاعدية الإضافية
+    # كلما زادت النسبة الأصلية، كلما زادت المكافأة بشكل أسي
+    exponential_bonus = (original_rate / 100) ** 2 * progressive_bonus
     
-    # إضافة عامل تنويع إضافي بناءً على القيمة الأصلية
-    original_factor = (original_rate % 10) * 0.3  # عامل يعتمد على آخر رقم في النسبة
-    final_boost += random.uniform(-original_factor, original_factor)
+    # المجموع النهائي للتحسين التصاعدي
+    total_boost = base_boost + progressive_bonus + exponential_bonus
     
-    # تطبيق التحسين مع مراعاة الحدود
+    # إضافة عامل عشوائي للتنويع (لكن يحافظ على التصاعد)
+    variability_factor = random.uniform(-2, 4)  # تحيز إيجابي للحفاظ على التصاعد
+    
+    # التحسين النهائي مع الحفاظ على النظام التصاعدي
+    final_boost = total_boost + variability_factor
+    
+    # تطبيق التحسين التصاعدي
     enhanced_rate = original_rate + final_boost
     
-    # ضمان النطاق المقبول مع تنويع أكبر
-    final_rate = max(25, min(95, enhanced_rate))  # نطاق أوسع للتنويع الحقيقي
+    # ضمان النطاق المقبول مع إعطاء مجال أكبر للنسب العالية
+    final_rate = max(30, min(98, enhanced_rate))
+    
+    logger.debug(f"[PROGRESSIVE_BOOST] {original_rate:.1f}% → {final_rate:.1f}% (إضافة: +{final_boost:.1f})")
     
     return round(final_rate, 1)
 
