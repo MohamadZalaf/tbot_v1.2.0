@@ -87,6 +87,9 @@ MONITORING_FREQUENCY = 30  # التردد الافتراضي 30 ثانية
 # متغير للتحكم في طول الإشعارات (True = قصير، False = طويل)
 SHORT_NOTIFICATIONS = True
 
+# متغير للتحكم في إرسال رسائل المؤشرات للإطارات المختلفة
+SEND_FRAMES_MESSAGES = False  # افتراضياً معطل
+
 # إضافة locks لتجنب التضارب في عمليات MT5
 import threading
 mt5_operation_lock = threading.RLock()  # RLock للسماح بإعادة الاستخدام من نفس الـ thread
@@ -924,6 +927,52 @@ def handle_switch_notification_length_command(message):
     except Exception as e:
         logger.error(f"[SWITCH_NOTIFICATION] خطأ في معالجة أمر تبديل الإشعارات: {e}")
         bot.reply_to(message, f"❌ خطأ في تبديل طول الإشعارات: {str(e)}")
+
+@bot.message_handler(commands=['send_frames_msg'])
+def handle_send_frames_msg_command(message):
+    """معالج أمر تفعيل/إلغاء تفعيل إرسال رسائل المؤشرات للإطارات المختلفة"""
+    try:
+        user_id = message.from_user.id
+        
+        # التحقق من تسجيل الدخول
+        if not user_sessions.get(user_id, {}).get('authenticated', False):
+            bot.reply_to(message, "🔐 يرجى تسجيل الدخول أولاً باستخدام /start")
+            return
+        
+        # تبديل حالة إرسال رسائل الإطارات
+        global SEND_FRAMES_MESSAGES
+        SEND_FRAMES_MESSAGES = not SEND_FRAMES_MESSAGES
+        
+        status = "🟢 مُفعل" if SEND_FRAMES_MESSAGES else "🔴 معطل"
+        action = "تفعيل" if SEND_FRAMES_MESSAGES else "إلغاء تفعيل"
+        
+        response_message = f"""
+✅ **تم {action} إرسال رسائل المؤشرات بنجاح!**
+
+📊 **الحالة الحالية:** {status}
+
+🔧 **ما يعني هذا:**
+{'• ستصلك رسائل منفصلة تحتوي على مؤشرات الإطارات M5, M15, M30, M60 مع كل تحليل يدوي' if SEND_FRAMES_MESSAGES else '• لن تصلك رسائل منفصلة للمؤشرات - ستظهر فقط في التحليل الخلفي للـ AI'}
+
+⏰ **متى تُرسل:**
+{'• مع كل تحليل يدوي للرموز' if SEND_FRAMES_MESSAGES else '• لا تُرسل (البيانات متاحة فقط للـ AI في الخلفية)'}
+{'• تحتوي على مؤشرات RSI, MACD, المتوسطات المتحركة لكل إطار زمني' if SEND_FRAMES_MESSAGES else ''}
+
+🎯 **الهدف:**
+معرفة تفاصيل المؤشرات الفنية لجميع الإطارات الزمنية بشكل واضح ومنظم
+
+🔄 **لتغيير الإعداد مرة أخرى:** استخدم `/send_frames_msg`
+
+───────────────────────
+🤖 **بوت التداول v1.2.0** | إعدادات المؤشرات المتقدمة
+        """
+        
+        bot.reply_to(message, response_message, parse_mode='Markdown')
+        logger.info(f"[FRAMES_MSG] المستخدم {user_id} قام بـ {action} إرسال رسائل المؤشرات")
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في أمر send_frames_msg: {e}")
+        bot.reply_to(message, f"❌ خطأ في معالجة الأمر: {str(e)}")
 
 @bot.message_handler(commands=['renew_api_context'])
 def handle_renew_api_context_command(message):
@@ -4476,6 +4525,34 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
     except Exception as e:
         logger.error(f"[ERROR] خطأ عام في حساب المؤشرات متعددة الإطارات للرمز {symbol}: {e}")
         return {}
+
+def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict, multi_tf_indicators: Dict):
+    """إرسال رسالة منفصلة للمؤشرات الفنية متعددة الإطارات إذا كانت مفعلة"""
+    try:
+        # التحقق من تفعيل إرسال رسائل الإطارات
+        if not SEND_FRAMES_MESSAGES:
+            return
+        
+        if not multi_tf_indicators:
+            logger.debug(f"[FRAMES_MSG] لا توجد مؤشرات متعددة الإطارات للرمز {symbol}")
+            return
+        
+        # تنسيق الرسالة
+        frames_message = format_multi_timeframe_indicators_message(symbol, symbol_info, multi_tf_indicators)
+        
+        # إرسال الرسالة
+        try:
+            bot.send_message(
+                chat_id=user_id,
+                text=frames_message,
+                parse_mode='Markdown'
+            )
+            logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات للمستخدم {user_id} للرمز {symbol}")
+        except Exception as send_error:
+            logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة مؤشرات الإطارات للمستخدم {user_id}: {send_error}")
+            
+    except Exception as e:
+        logger.error(f"[FRAMES_MSG] خطأ في إرسال رسالة مؤشرات الإطارات: {e}")
 
 def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, multi_tf_indicators: Dict) -> str:
     """تنسيق رسالة المؤشرات الفنية متعددة الإطارات"""
@@ -9732,6 +9809,26 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
                     logger.error(f"[ERROR] فشل إرسال الرسالة حتى بدون تنسيق: {e2}")
                     return
         
+        # إرسال رسالة المؤشرات متعددة الإطارات إذا كانت مفعلة
+        try:
+            if SEND_FRAMES_MESSAGES and fresh_analysis and isinstance(fresh_analysis, dict):
+                # جلب المؤشرات متعددة الإطارات من التحليل إذا كانت موجودة
+                multi_tf_indicators = fresh_analysis.get('multi_tf_indicators')
+                
+                # إذا لم تكن متوفرة، حسابها الآن
+                if not multi_tf_indicators:
+                    logger.debug(f"[FRAMES_MSG] حساب المؤشرات متعددة الإطارات للرمز {symbol}")
+                    multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+                
+                # إرسال رسالة المؤشرات
+                if multi_tf_indicators:
+                    send_frames_indicators_message(user_id, symbol, symbol_info, multi_tf_indicators)
+                    logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات مع التنبيه للمستخدم {user_id}")
+                else:
+                    logger.debug(f"[FRAMES_MSG] لا توجد مؤشرات متعددة الإطارات للرمز {symbol}")
+        except Exception as frames_error:
+            logger.error(f"[FRAMES_MSG] خطأ في إرسال رسالة مؤشرات الإطارات: {frames_error}")
+        
         # تسجيل وقت الإرسال
         frequency_manager.record_notification_sent(user_id, symbol)
         
@@ -11131,15 +11228,25 @@ def handle_single_symbol_analysis(call):
             
             logger.info(f"[SUCCESS] تم إرسال تحليل الرمز {symbol} للمستخدم {user_id}")
             
-            # حساب المؤشرات الفنية متعددة الإطارات في الخلفية للـ AI (بدون إرسال للمستخدم)
+            # حساب المؤشرات الفنية متعددة الإطارات في الخلفية للـ AI وإرسالها للمستخدم إذا كانت مفعلة
             try:
                 logger.info(f"[INDICATORS_BACKGROUND] حساب المؤشرات متعددة الإطارات في الخلفية للرمز {symbol}")
                 
-                # حساب المؤشرات على الفريمات المختلفة للـ AI فقط
+                # حساب المؤشرات على الفريمات المختلفة
                 multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
                 
                 if multi_tf_indicators:
                     logger.info(f"[SUCCESS] تم حساب المؤشرات متعددة الإطارات في الخلفية للرمز {symbol}")
+                    
+                    # إرسال رسالة المؤشرات للمستخدم إذا كانت مفعلة
+                    if SEND_FRAMES_MESSAGES:
+                        try:
+                            send_frames_indicators_message(user_id, symbol, symbol_info, multi_tf_indicators)
+                            logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات مع التحليل اليدوي للمستخدم {user_id}")
+                        except Exception as frames_send_error:
+                            logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة مؤشرات الإطارات: {frames_send_error}")
+                    else:
+                        logger.debug(f"[FRAMES_MSG] إرسال رسائل الإطارات معطل - البيانات متاحة للـ AI فقط")
                 else:
                     logger.warning(f"[WARNING] لا توجد مؤشرات متاحة في الخلفية للرمز {symbol}")
                     
@@ -12133,6 +12240,11 @@ def handle_help(call):
    • اذهب للإعدادات → اختيار الرموز للمراقبة
    • ستصلك إشعارات ذكية مخصصة كل 30 ثانية
    • التحليل يراعي نمط التداول ورأس المال
+
+📈 **رسائل المؤشرات متعددة الإطارات:**
+   • استخدم الأمر `/send_frames_msg` لتفعيل/إلغاء تفعيل
+   • ستصلك رسائل منفصلة تحتوي على مؤشرات M5, M15, M30, M60
+   • تُرسل مع كل تحليل يدوي وإشعار آلي
 
 3️⃣ **نظام التقييم والتعلم:**
    • اضغط 👍 للإشارات الدقيقة، 👎 للخاطئة
