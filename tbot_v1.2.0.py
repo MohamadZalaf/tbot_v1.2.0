@@ -5449,6 +5449,11 @@ class GeminiAnalyzer:
             # تحليل شامل في الخلفية لجميع البيانات (كما طلب المستخدم)
             background_analysis = self._perform_enhanced_background_analysis(symbol, price_data, technical_data, user_id)
             
+            # حفظ المؤشرات المتعددة الإطارات مع التحليل
+            analysis_result = background_analysis
+            if isinstance(analysis_result, dict):
+                analysis_result['multi_tf_indicators'] = multi_tf_indicators
+            
             # استخدام نفس دالة التحليل الشامل المستخدمة في الوضع اليدوي
             analysis_text = self._analyze_with_full_manual_instructions(symbol, price_data, technical_data, user_id)
             
@@ -5517,7 +5522,7 @@ class GeminiAnalyzer:
             try:
                 logger.info(f"[AI_INDICATORS] جلب المؤشرات متعددة الإطارات للرمز {symbol}")
                 multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
-                indicators_text = self._format_multi_timeframe_indicators_for_ai(symbol, multi_tf_indicators)
+                indicators_text = format_multi_timeframe_indicators_for_ai(symbol, multi_tf_indicators)
                 logger.info(f"[AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للرمز {symbol}")
             except Exception as indicators_error:
                 logger.error(f"[AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
@@ -14815,6 +14820,230 @@ if __name__ == "__main__":
         price_data_cache.clear()
         last_api_calls.clear()
         logger.info("[SYSTEM] تم تنظيف جميع البيانات المؤقتة عند بدء التشغيل")
+
+def format_multi_timeframe_indicators_for_ai(symbol: str, multi_tf_indicators: Dict) -> str:
+    """تنسيق المؤشرات الفنية متعددة الإطارات للذكاء الاصطناعي - شامل ومفصل"""
+    try:
+        if not multi_tf_indicators:
+            return "لا توجد مؤشرات فنية متوفرة"
+        
+        ai_text = f"=== المؤشرات الفنية الشاملة للرمز {symbol} ===\n\n"
+        
+        timeframe_names = {
+            'M5': '5 دقائق',
+            'M15': '15 دقيقة', 
+            'M30': '30 دقيقة',
+            'M60': '60 دقيقة'
+        }
+        
+        for tf_key, tf_name in timeframe_names.items():
+            indicators = multi_tf_indicators.get(tf_key, {})
+            
+            if indicators:
+                ai_text += f"--- إطار {tf_name} ({tf_key}) ---\n"
+                
+                # 📈 TREND INDICATORS
+                ai_text += "📈 مؤشرات الاتجاه:\n"
+                
+                # Moving Averages
+                for ma_key in ['ma_9', 'ma_21', 'ma_50']:
+                    ma_val = indicators.get(ma_key)
+                    if ma_val is not None:
+                        ma_period = ma_key.split('_')[1]
+                        ai_text += f"- MA({ma_period}): {ma_val:.5f}\n"
+                
+                # EMAs
+                for ema_key in ['ema_12', 'ema_26']:
+                    ema_val = indicators.get(ema_key)
+                    if ema_val is not None:
+                        ema_period = ema_key.split('_')[1]
+                        ai_text += f"- EMA({ema_period}): {ema_val:.5f}\n"
+                
+                # Bollinger Bands
+                bb_upper = indicators.get('bb_upper')
+                bb_middle = indicators.get('bb_middle')
+                bb_lower = indicators.get('bb_lower')
+                bb_width = indicators.get('bb_width')
+                if bb_upper and bb_lower:
+                    ai_text += f"- Bollinger Bands: Upper={bb_upper:.5f}, Middle={bb_middle:.5f}, Lower={bb_lower:.5f}"
+                    if bb_width:
+                        ai_text += f", Width={bb_width:.5f}"
+                    ai_text += "\n"
+                
+                # Other trend indicators
+                for indicator_name, key in [
+                    ('Parabolic SAR', 'sar'),
+                    ('Standard Deviation', 'std_dev'),
+                    ('ADX', 'adx')
+                ]:
+                    val = indicators.get(key)
+                    if val is not None:
+                        ai_text += f"- {indicator_name}: {val:.5f}\n"
+                
+                # Envelopes
+                env_upper = indicators.get('env_upper')
+                env_lower = indicators.get('env_lower')
+                if env_upper and env_lower:
+                    ai_text += f"- Envelopes: Upper={env_upper:.5f}, Lower={env_lower:.5f}\n"
+                
+                # Ichimoku
+                ichimoku = indicators.get('ichimoku', {})
+                if ichimoku:
+                    ai_text += "- Ichimoku: "
+                    parts = []
+                    if 'tenkan_sen' in ichimoku:
+                        parts.append(f"Tenkan={ichimoku['tenkan_sen']:.5f}")
+                    if 'kijun_sen' in ichimoku:
+                        parts.append(f"Kijun={ichimoku['kijun_sen']:.5f}")
+                    if 'chikou_span' in ichimoku:
+                        parts.append(f"Chikou={ichimoku['chikou_span']:.5f}")
+                    ai_text += ", ".join(parts) + "\n"
+                
+                ai_text += "\n"
+                
+                # 🔄 OSCILLATORS
+                ai_text += "🔄 المذبذبات:\n"
+                
+                # RSI
+                rsi = indicators.get('rsi')
+                rsi_interpretation = indicators.get('rsi_interpretation', '')
+                if rsi is not None:
+                    ai_text += f"- RSI: {rsi:.1f} ({rsi_interpretation})\n"
+                
+                # MACD
+                macd_data = indicators.get('macd', {})
+                macd_interpretation = indicators.get('macd_interpretation', '')
+                if macd_data and macd_data.get('macd') is not None:
+                    ai_text += f"- MACD: {macd_data['macd']:.6f}, Signal: {macd_data.get('signal', 0):.6f}, Histogram: {macd_data.get('histogram', 0):.6f} ({macd_interpretation})\n"
+                
+                # Stochastic
+                stochastic = indicators.get('stochastic', {})
+                stoch_interpretation = indicators.get('stochastic_interpretation', '')
+                if stochastic.get('k') is not None and stochastic.get('d') is not None:
+                    ai_text += f"- Stochastic: %K={stochastic['k']:.1f}, %D={stochastic['d']:.1f} ({stoch_interpretation})\n"
+                
+                # Other oscillators
+                for indicator_name, key in [
+                    ('Williams %R', 'williams_r'),
+                    ('CCI', 'cci'),
+                    ('Momentum', 'momentum'),
+                    ('DeMarker', 'demarker'),
+                    ('Force Index', 'force_index'),
+                    ('OSMA', 'osma'),
+                    ('RVI', 'rvi'),
+                    ('Bears Power', 'bears_power'),
+                    ('Bulls Power', 'bulls_power')
+                ]:
+                    val = indicators.get(key)
+                    if val is not None:
+                        ai_text += f"- {indicator_name}: {val:.5f}\n"
+                
+                ai_text += "\n"
+                
+                # 📊 VOLUMES
+                ai_text += "📊 أحجام التداول:\n"
+                
+                current_volume = indicators.get('current_volume')
+                avg_volume = indicators.get('avg_volume')
+                volume_ratio = indicators.get('volume_ratio')
+                if current_volume is not None:
+                    ai_text += f"- الحجم الحالي: {current_volume:,}\n"
+                if avg_volume is not None:
+                    ai_text += f"- متوسط الحجم: {avg_volume:,}\n"
+                if volume_ratio is not None:
+                    ai_text += f"- نسبة الحجم: {volume_ratio:.2f}x\n"
+                
+                # Volume indicators
+                for indicator_name, key in [
+                    ('OBV', 'obv'),
+                    ('A/D', 'ad'),
+                    ('MFI', 'mfi')
+                ]:
+                    val = indicators.get(key)
+                    if val is not None:
+                        if key in ['obv', 'ad']:
+                            ai_text += f"- {indicator_name}: {val:,.0f}\n"
+                        else:
+                            ai_text += f"- {indicator_name}: {val:.2f}\n"
+                
+                volume_interpretation = indicators.get('volume_interpretation', '')
+                activity_level = indicators.get('activity_level', '')
+                if volume_interpretation:
+                    ai_text += f"- تحليل الحجم: {volume_interpretation}\n"
+                if activity_level:
+                    ai_text += f"- مستوى النشاط: {activity_level}\n"
+                
+                ai_text += "\n"
+                
+                # 🧠 BILL WILLIAMS
+                ai_text += "🧠 مؤشرات بيل ويليامز:\n"
+                
+                # Awesome and Accelerator Oscillators
+                ao = indicators.get('awesome_oscillator')
+                if ao is not None:
+                    ai_text += f"- Awesome Oscillator: {ao:.6f}\n"
+                
+                ac = indicators.get('accelerator_oscillator')
+                if ac is not None:
+                    ai_text += f"- Accelerator Oscillator: {ac:.6f}\n"
+                
+                # Alligator
+                alligator = indicators.get('alligator', {})
+                if alligator:
+                    ai_text += "- Alligator: "
+                    parts = []
+                    if 'jaw' in alligator:
+                        parts.append(f"Jaw={alligator['jaw']:.5f}")
+                    if 'teeth' in alligator:
+                        parts.append(f"Teeth={alligator['teeth']:.5f}")
+                    if 'lips' in alligator:
+                        parts.append(f"Lips={alligator['lips']:.5f}")
+                    ai_text += ", ".join(parts) + "\n"
+                
+                # Gator
+                gator = indicators.get('gator', {})
+                if gator:
+                    upper = gator.get('upper')
+                    lower = gator.get('lower')
+                    if upper is not None and lower is not None:
+                        ai_text += f"- Gator: Upper={upper:.5f}, Lower={lower:.5f}\n"
+                
+                # MFI and Fractals
+                mfindex = indicators.get('market_facilitation_index')
+                if mfindex is not None:
+                    ai_text += f"- Market Facilitation Index: {mfindex:.5f}\n"
+                
+                fractals = indicators.get('fractals', {})
+                if fractals:
+                    ai_text += "- Fractals: "
+                    parts = []
+                    if 'up' in fractals:
+                        parts.append(f"Up={fractals['up']:.5f}")
+                    if 'down' in fractals:
+                        parts.append(f"Down={fractals['down']:.5f}")
+                    ai_text += ", ".join(parts) + "\n"
+                
+                ai_text += "\n"
+                
+                # ATR
+                atr = indicators.get('atr')
+                if atr is not None:
+                    ai_text += f"🔧 متوسط المدى الحقيقي (ATR): {atr:.5f}\n"
+                
+                ai_text += "\n" + "="*50 + "\n\n"
+            
+            else:
+                ai_text += f"--- إطار {tf_name} ({tf_key}) ---\n"
+                ai_text += "لا توجد بيانات متوفرة لهذا الإطار\n\n"
+        
+        ai_text += f"🕐 وقت التحديث: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        ai_text += "📡 المصدر: MetaTrader5 (بيانات لحظية حقيقية)\n"
+        
+        return ai_text
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في تنسيق المؤشرات للذكاء الاصطناعي: {e}")
+        return f"خطأ في تنسيق المؤشرات الفنية للرمز {symbol}"
         
         print("\n" + "="*60)
         print("🚀 بوت التداول v1.2.0 جاهز للعمل!")
