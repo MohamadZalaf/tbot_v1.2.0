@@ -9172,15 +9172,15 @@ def apply_hidden_success_boost(original_rate: float) -> float:
     
     # تحديد القيمة العشوائية بناءً على النسبة الحالية - المنطق المُصحح
     if original_rate < 40:
-        random_boost = random.choice([8, 12])   # أقل تحسين للنسب المنخفضة (منطق صحيح)
+        random_boost = random.choice([3, 5])   # أقل تحسين للنسب المنخفضة (منطق صحيح)
     elif original_rate < 60:
-        random_boost = random.choice([10, 14])   # تحسين متوسط
+        random_boost = random.choice([5, 7])   # تحسين متوسط
     elif original_rate < 75:
-        random_boost = random.choice([12, 16])   # تحسين متوسط-عالي
+        random_boost = random.choice([7, 9])   # تحسين متوسط-عالي
     elif original_rate < 85:
-        random_boost = random.choice([14, 18])  # تحسين عالي
+        random_boost = random.choice([9, 11])  # تحسين عالي
     else:
-        random_boost = random.choice([16, 20]) # أعلى تحسين للنسب العالية (منطق صحيح)
+        random_boost = random.choice([11, 13]) # أعلى تحسين للنسب العالية (منطق صحيح)
     
     # تطبيق التحسين مع مراعاة الحدود
     enhanced_rate = original_rate + random_boost
@@ -9342,9 +9342,9 @@ def calculate_basic_technical_success_rate(technical_data: Dict, action: str) ->
     if not technical_data or not technical_data.get('indicators'):
         # إذا لم تتوفر مؤشرات، نحسب بناءً على نوع الإجراء مع تحسين خفي
         if action == 'BUY':
-            return apply_hidden_success_boost(72.0)  # نسبة محسنة للشراء (+10)
+            return apply_hidden_success_boost(62.0)  # نسبة جيدة للشراء
         elif action == 'SELL':
-            return apply_hidden_success_boost(68.0)  # نسبة محسنة للبيع (+10)
+            return apply_hidden_success_boost(58.0)  # نسبة متوسطة للبيع
         else:
             return apply_hidden_success_boost(40.0)  # نسبة منخفضة للانتظار
     
