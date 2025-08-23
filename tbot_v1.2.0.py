@@ -87,6 +87,9 @@ MONITORING_FREQUENCY = 30  # التردد الافتراضي 30 ثانية
 # متغير للتحكم في طول الإشعارات (True = قصير، False = طويل)
 SHORT_NOTIFICATIONS = True
 
+# متغير للتحكم في إرسال رسائل المؤشرات للإطارات المختلفة
+SEND_FRAMES_MESSAGES = False  # افتراضياً معطل
+
 # إضافة locks لتجنب التضارب في عمليات MT5
 import threading
 mt5_operation_lock = threading.RLock()  # RLock للسماح بإعادة الاستخدام من نفس الـ thread
@@ -925,6 +928,53 @@ def handle_switch_notification_length_command(message):
         logger.error(f"[SWITCH_NOTIFICATION] خطأ في معالجة أمر تبديل الإشعارات: {e}")
         bot.reply_to(message, f"❌ خطأ في تبديل طول الإشعارات: {str(e)}")
 
+@bot.message_handler(commands=['send_frames_msg'])
+def handle_send_frames_msg_command(message):
+    """معالج أمر تفعيل/إلغاء تفعيل إرسال رسائل المؤشرات للإطارات المختلفة - للمطور فقط"""
+    try:
+        user_id = message.from_user.id
+        DEVELOPER_ID = 6891599955  # ID المطور الفعلي
+        
+        # التحقق من أن المستخدم هو المطور
+        if user_id != DEVELOPER_ID:
+            bot.reply_to(message, "⚠️ هذا الأمر متاح للمطور فقط")
+            return
+        
+        # تبديل حالة إرسال رسائل الإطارات
+        global SEND_FRAMES_MESSAGES
+        SEND_FRAMES_MESSAGES = not SEND_FRAMES_MESSAGES
+        
+        status = "🟢 مُفعل" if SEND_FRAMES_MESSAGES else "🔴 معطل"
+        action = "تفعيل" if SEND_FRAMES_MESSAGES else "إلغاء تفعيل"
+        
+        response_message = f"""
+✅ **تم {action} إرسال رسائل المؤشرات بنجاح!**
+
+📊 **الحالة الحالية:** {status}
+
+🔧 **ما يعني هذا:**
+{'• ستصلك رسائل منفصلة تحتوي على مؤشرات الإطارات M5, M15, M30, M60 مع كل تحليل يدوي' if SEND_FRAMES_MESSAGES else '• لن تصلك رسائل منفصلة للمؤشرات - ستظهر فقط في التحليل الخلفي للـ AI'}
+
+⏰ **متى تُرسل:**
+{'• مع كل تحليل يدوي للرموز' if SEND_FRAMES_MESSAGES else '• لا تُرسل (البيانات متاحة فقط للـ AI في الخلفية)'}
+{'• تحتوي على مؤشرات RSI, MACD, المتوسطات المتحركة لكل إطار زمني' if SEND_FRAMES_MESSAGES else ''}
+
+🎯 **الهدف:**
+معرفة تفاصيل المؤشرات الفنية لجميع الإطارات الزمنية بشكل واضح ومنظم
+
+🔄 **لتغيير الإعداد مرة أخرى:** استخدم `/send_frames_msg`
+
+───────────────────────
+🤖 **بوت التداول v1.2.0** | إعدادات المؤشرات المتقدمة
+        """
+        
+        bot.reply_to(message, response_message, parse_mode='Markdown')
+        logger.info(f"[FRAMES_MSG] المستخدم {user_id} قام بـ {action} إرسال رسائل المؤشرات")
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في أمر send_frames_msg: {e}")
+        bot.reply_to(message, f"❌ خطأ في معالجة الأمر: {str(e)}")
+
 @bot.message_handler(commands=['renew_api_context'])
 def handle_renew_api_context_command(message):
     """معالج أمر تجديد سياق API - لإغلاق جميع المحادثات والبدء من جديد - للمطور فقط"""
@@ -1563,65 +1613,78 @@ def format_very_short_alert_message(symbol: str, symbol_info: Dict, price_data: 
         # تحديد الفريم (ثابت M15)
         timeframe = "M15"
         
-        # جلب تفسير AI مختصر للمؤشرات في الفريم 15 دقيقة
+        # جلب تفسير AI مختصر ومحسن للفريم 15 دقيقة
         ai_explanation = ""
         try:
-            # استخدام Gemini AI لتفسير سبب نسبة النجاح بناءً على مؤشرات الـ 15 دقيقة
-            technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
-            indicators = technical_data.get('indicators', {}) if technical_data else {}
+            # جلب مؤشرات الفريم 15 دقيقة بدقة
+            multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+            m15_indicators = multi_tf_indicators.get('M15', {}).get('indicators', {}) if multi_tf_indicators else {}
             
-            if indicators:
-                # تحضير بيانات المؤشرات للـ AI
-                rsi = indicators.get('rsi', 50)
-                macd = indicators.get('macd', {})
-                ma_20 = indicators.get('ma_20', 0)
-                ma_50 = indicators.get('ma_50', 0)
-                volume_ratio = indicators.get('volume_ratio', 1.0)
+            if m15_indicators:
+                # بيانات دقيقة من الفريم 15 دقيقة
+                rsi = m15_indicators.get('rsi', 50)
+                macd_data = m15_indicators.get('macd', {})
+                macd_value = macd_data.get('macd', 0)
+                macd_signal = macd_data.get('signal', 0)
+                macd_histogram = macd_data.get('histogram', 0)
                 
-                # طلب تفسير مختصر من AI
-                prompt = f"""بناءً على مؤشرات الـ 15 دقيقة للرمز {symbol}:
-RSI: {rsi:.1f}, MACD: {macd.get('macd', 0):.4f}, MA20: {ma_20:.5f}, MA50: {ma_50:.5f}, Volume: {volume_ratio:.1f}x
-اكتب سطر أو سطرين مختصرين يفسران لماذا نسبة النجاح المتوقعة هي {confidence:.0f}% للصفقة {trade_type}."""
+                stoch_data = m15_indicators.get('stochastic', {})
+                stoch_k = stoch_data.get('k', 50)
+                stoch_d = stoch_data.get('d', 50)
+                
+                volume_ratio = m15_indicators.get('volume_ratio', 1.0)
+                
+                # طلب تفسير مختصر جداً (سطر واحد) من AI للفريم 15
+                prompt = f"""فريم 15 دقيقة للرمز {symbol}:
+RSI: {rsi:.1f}, MACD: {macd_value:.5f} (Signal: {macd_signal:.5f}, Histogram: {macd_histogram:.5f}), Stochastic K: {stoch_k:.1f}, D: {stoch_d:.1f}, Volume: {volume_ratio:.1f}x
+
+اكتب سطر واحد فقط (أقل من 80 حرف) يفسر سبب نسبة النجاح {confidence:.0f}% للصفقة {trade_type} بناءً على هذه المؤشرات."""
                 
                 # استخدام Gemini لتوليد التفسير
                 if gemini_analyzer.model:
                     response = gemini_analyzer.model.generate_content(prompt)
                     if response and response.text:
                         ai_explanation = response.text.strip()
-                        # تحديد طول التفسير لسطرين كحد أقصى
-                        lines = ai_explanation.split('\n')
-                        if len(lines) > 2:
-                            ai_explanation = '\n'.join(lines[:2])
+                        # قطع التفسير لسطر واحد قصير
+                        if '\n' in ai_explanation:
+                            ai_explanation = ai_explanation.split('\n')[0]
+                        # تحديد طول أقصى 80 حرف
+                        if len(ai_explanation) > 80:
+                            ai_explanation = ai_explanation[:77] + "..."
         except Exception as e:
             logger.warning(f"[AI_EXPLANATION] فشل في توليد تفسير AI للرمز {symbol}: {e}")
-            # تفسير ديناميكي بناءً على المؤشرات الفعلية (بدون قيم ثابتة)
+            # تفسير ديناميكي محسن بناءً على مؤشرات الفريم 15
             try:
-                # جلب المؤشرات الفعلية لتوليد تفسير ديناميكي
-                technical_data = mt5_manager.calculate_technical_indicators(symbol) if mt5_manager else None
-                indicators = technical_data.get('indicators', {}) if technical_data else {}
+                # محاولة جلب مؤشرات الفريم 15 للتفسير الاحتياطي
+                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+                m15_indicators = multi_tf_indicators.get('M15', {}).get('indicators', {}) if multi_tf_indicators else {}
                 
-                if indicators:
-                    rsi = indicators.get('rsi', 50)
-                    macd_data = indicators.get('macd', {})
+                if m15_indicators:
+                    rsi = m15_indicators.get('rsi', 50)
+                    macd_data = m15_indicators.get('macd', {})
                     macd_value = macd_data.get('macd', 0) if macd_data else 0
+                    stoch_data = m15_indicators.get('stochastic', {})
+                    stoch_k = stoch_data.get('k', 50)
                     
-                    # تفسير ديناميكي بناءً على القيم الفعلية
-                    rsi_status = "منخفض" if rsi < 40 else "مرتفع" if rsi > 60 else "متوسط"
-                    macd_trend = "إيجابي" if macd_value > 0 else "سلبي" if macd_value < 0 else "محايد"
+                    # تفسير مختصر وذكي بناءً على القيم الفعلية للفريم 15
+                    rsi_signal = "ذروة بيع" if rsi < 30 else "ذروة شراء" if rsi > 70 else "متوازن"
+                    macd_signal = "صاعد" if macd_value > 0 else "هابط"
+                    stoch_signal = "مشبع شراء" if stoch_k > 80 else "مشبع بيع" if stoch_k < 20 else "متوسط"
                     
+                    # إنشاء تفسير قصير وموجز
                     if action == 'BUY':
-                        ai_explanation = f"RSI {rsi_status} ({rsi:.1f}) وMACD {macd_trend} يدعم الشراء بنسبة {confidence:.0f}%"
+                        ai_explanation = f"M15: RSI {rsi_signal} ({rsi:.0f}), MACD {macd_signal}, Stoch {stoch_signal} → شراء {confidence:.0f}%"
                     elif action == 'SELL':
-                        ai_explanation = f"RSI {rsi_status} ({rsi:.1f}) وMACD {macd_trend} يدعم البيع بنسبة {confidence:.0f}%"
+                        ai_explanation = f"M15: RSI {rsi_signal} ({rsi:.0f}), MACD {macd_signal}, Stoch {stoch_signal} → بيع {confidence:.0f}%"
                     else:
-                        ai_explanation = f"RSI {rsi_status} ({rsi:.1f}) وMACD {macd_trend} يستدعي الانتظار بنسبة {confidence:.0f}%"
+                        ai_explanation = f"M15: RSI {rsi_signal} ({rsi:.0f}), MACD {macd_signal} → انتظار {confidence:.0f}%"
                 else:
-                    # إذا لم تتوفر مؤشرات، استخدم معلومات من التحليل نفسه
-                    ai_explanation = f"تحليل المؤشرات يشير لنسبة نجاح {confidence:.0f}% للصفقة {trade_type}"
+                    # إذا لم تتوفر مؤشرات، استخدم تفسير أساسي قصير
+                    ai_explanation = f"تحليل فني M15 يدعم {trade_type} بنسبة {confidence:.0f}%"
             except Exception as fallback_error:
                 logger.error(f"[AI_FALLBACK] فشل في التفسير الاحتياطي للرمز {symbol}: {fallback_error}")
-                # آخر حل: تفسير بسيط جداً بناءً على البيانات المتوفرة
-                ai_explanation = f"تحليل فني يشير لنسبة نجاح {confidence:.0f}% للاتجاه {trade_type}"
+                # آخر حل: تفسير بسيط جداً
+                ai_explanation = f"M15 يدعم {trade_type} - {confidence:.0f}%"
         
         # تنسيق الرسالة المختصرة حسب التصميم المطلوب (ديناميكية 100%)
         message = f"""📊 **صفقة مقترحة**
@@ -4238,9 +4301,38 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
             try:
                 logger.info(f"[MULTI_TF] حساب المؤشرات للرمز {symbol} على إطار {tf_name}")
                 
-                # جلب البيانات للإطار الزمني المحدد
+                # جلب البيانات اللحظية للإطار الزمني المحدد (بدون شمعة غير مكتملة)
                 with mt5_operation_lock:
-                    df = mt5_manager.get_market_data(symbol, tf_value, 100)
+                    # جلب 50 شمعة مكتملة + محاولة جلب البيانات اللحظية
+                    df = mt5_manager.get_market_data(symbol, tf_value, 50)
+                    
+                    # إضافة البيانات اللحظية الحالية كآخر شمعة
+                    try:
+                        live_price_data = mt5_manager.get_live_price(symbol, force_fresh=True)
+                        if live_price_data and df is not None and len(df) > 0:
+                            # إنشاء شمعة حالية من البيانات اللحظية
+                            current_time = datetime.now()
+                            last_close = df['close'].iloc[-1]
+                            current_price = live_price_data.get('last', live_price_data.get('bid', last_close))
+                            
+                            # إضافة البيانات اللحظية كآخر صف
+                            live_candle = {
+                                'time': current_time,
+                                'open': last_close,  # نستخدم آخر إغلاق كافتتاح للشمعة الحالية
+                                'high': max(last_close, current_price),
+                                'low': min(last_close, current_price),
+                                'close': current_price,
+                                'tick_volume': live_price_data.get('volume', df['tick_volume'].iloc[-1] if 'tick_volume' in df else 1000),
+                                'real_volume': live_price_data.get('volume', 0)
+                            }
+                            
+                            # إضافة الشمعة اللحظية
+                            live_df = pd.DataFrame([live_candle])
+                            df = pd.concat([df, live_df], ignore_index=True)
+                            
+                            logger.debug(f"[LIVE_DATA] أضيفت بيانات لحظية للرمز {symbol} في إطار {tf_name}: {current_price}")
+                    except Exception as live_error:
+                        logger.warning(f"[LIVE_DATA] فشل في إضافة البيانات اللحظية للرمز {symbol}: {live_error}")
                 
                 if df is None or len(df) < 20:
                     logger.warning(f"[WARNING] بيانات غير كافية للرمز {symbol} على إطار {tf_name}")
@@ -4282,19 +4374,26 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
                     indicators['rsi'] = None
                     indicators['rsi_interpretation'] = 'خطأ في الحساب'
                 
-                # MACD
+                # MACD - محسن مع الهيستوجرام
                 try:
                     if len(df) >= 26:
-                        macd_line = df['close'].ewm(span=12).mean() - df['close'].ewm(span=26).mean()
-                        signal_line = macd_line.ewm(span=9).mean()
+                        # حساب MACD مع ضمان استخدام البيانات اللحظية
+                        close_prices = df['close']
+                        ema_12 = close_prices.ewm(span=12, adjust=False).mean()
+                        ema_26 = close_prices.ewm(span=26, adjust=False).mean()
+                        macd_line = ema_12 - ema_26
+                        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+                        histogram = macd_line - signal_line
                         
                         current_macd = macd_line.iloc[-1] if not macd_line.empty else None
                         current_signal = signal_line.iloc[-1] if not signal_line.empty else None
+                        current_histogram = histogram.iloc[-1] if not histogram.empty else None
                         
                         if current_macd is not None and current_signal is not None and not pd.isna(current_macd) and not pd.isna(current_signal):
                             indicators['macd'] = {
                                 'macd': round(float(current_macd), 6),
-                                'signal': round(float(current_signal), 6)
+                                'signal': round(float(current_signal), 6),
+                                'histogram': round(float(current_histogram), 6) if current_histogram is not None else 0
                             }
                             
                             # تفسير MACD
@@ -4337,16 +4436,31 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
                     indicators['ma_9'] = None
                     indicators['ma_21'] = None
                 
-                # Stochastic Oscillator
+                # Stochastic Oscillator - محسن للبيانات اللحظية
                 try:
                     if len(df) >= 14:
-                        high_14 = df['high'].rolling(window=14).max()
-                        low_14 = df['low'].rolling(window=14).min()
-                        k_percent = 100 * ((df['close'] - low_14) / (high_14 - low_14))
-                        d_percent = k_percent.rolling(window=3).mean()
+                        # حساب %K بشكل أكثر دقة
+                        high_series = df['high']
+                        low_series = df['low']
+                        close_series = df['close']
                         
-                        current_k = k_percent.iloc[-1] if not k_percent.empty else None
-                        current_d = d_percent.iloc[-1] if not d_percent.empty else None
+                        # حساب أعلى وأقل قيمة خلال 14 فترة
+                        high_14 = high_series.rolling(window=14, min_periods=14).max()
+                        low_14 = low_series.rolling(window=14, min_periods=14).min()
+                        
+                        # تجنب القسمة على صفر
+                        denominator = high_14 - low_14
+                        k_percent = pd.Series(index=df.index, dtype=float)
+                        
+                        # حساب %K مع معالجة القسمة على صفر
+                        valid_mask = (denominator != 0) & (~pd.isna(denominator))
+                        k_percent[valid_mask] = 100 * ((close_series[valid_mask] - low_14[valid_mask]) / denominator[valid_mask])
+                        
+                        # حساب %D (متوسط متحرك لـ %K خلال 3 فترات)
+                        d_percent = k_percent.rolling(window=3, min_periods=1).mean()
+                        
+                        current_k = k_percent.iloc[-1] if not k_percent.empty and not pd.isna(k_percent.iloc[-1]) else None
+                        current_d = d_percent.iloc[-1] if not d_percent.empty and not pd.isna(d_percent.iloc[-1]) else None
                         
                         if current_k is not None and current_d is not None and not pd.isna(current_k) and not pd.isna(current_d):
                             indicators['stochastic'] = {
@@ -4400,24 +4514,45 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
                     logger.warning(f"[WARNING] فشل في حساب ATR للرمز {symbol} على إطار {tf_name}: {e}")
                     indicators['atr'] = None
                 
-                # Volume Analysis
+                # Volume Analysis - محسن للبيانات اللحظية
                 try:
                     if 'tick_volume' in df.columns and len(df) > 0:
+                        # الحصول على الحجم اللحظي الحقيقي
                         current_volume = df['tick_volume'].iloc[-1]
+                        
+                        # استخدام البيانات اللحظية للحجم إذا كانت متاحة
+                        try:
+                            live_price_data = mt5_manager.get_live_price(symbol, force_fresh=True)
+                            if live_price_data and live_price_data.get('volume', 0) > 0:
+                                current_volume = live_price_data['volume']
+                                logger.debug(f"[LIVE_VOLUME] استخدام حجم لحظي للرمز {symbol}: {current_volume}")
+                        except:
+                            pass
                         
                         if pd.isna(current_volume) or current_volume <= 0:
                             if 'real_volume' in df.columns:
                                 current_volume = df['real_volume'].iloc[-1]
                                 if pd.isna(current_volume) or current_volume <= 0:
-                                    current_volume = 1000  # قيمة افتراضية
+                                    # حساب حجم تقديري بناءً على الرمز
+                                    if 'XAU' in symbol or 'GOLD' in symbol:
+                                        current_volume = 500  # حجم منخفض للذهب
+                                    elif any(crypto in symbol for crypto in ['BTC', 'ETH']):
+                                        current_volume = 100  # حجم قليل للعملات الرقمية
+                                    else:
+                                        current_volume = 1000  # حجم افتراضي للفوركس
                         
                         indicators['current_volume'] = int(current_volume) if current_volume else 1000
                         
-                        # حساب متوسط الحجم
+                        # حساب متوسط الحجم بطريقة محسنة (استخدام الشموع التاريخية فقط، ليس اللحظية)
                         if len(df) >= 20:
-                            valid_volumes = df['tick_volume'][df['tick_volume'] > 0].dropna()
+                            # استخدام البيانات التاريخية فقط للمتوسط (بدون الشمعة اللحظية)
+                            historical_volumes = df['tick_volume'][:-1] if len(df) > 1 else df['tick_volume']
+                            valid_volumes = historical_volumes[historical_volumes > 0].dropna()
+                            
                             if len(valid_volumes) >= 10:
-                                avg_volume = valid_volumes.rolling(window=min(20, len(valid_volumes))).mean().iloc[-1]
+                                # استخدام آخر 14 شمعة للمتوسط
+                                recent_volumes = valid_volumes.tail(14)
+                                avg_volume = recent_volumes.mean()
                                 indicators['avg_volume'] = int(avg_volume) if avg_volume and not pd.isna(avg_volume) else indicators['current_volume']
                             else:
                                 indicators['avg_volume'] = indicators['current_volume']
@@ -4476,6 +4611,34 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
     except Exception as e:
         logger.error(f"[ERROR] خطأ عام في حساب المؤشرات متعددة الإطارات للرمز {symbol}: {e}")
         return {}
+
+def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict, multi_tf_indicators: Dict):
+    """إرسال رسالة منفصلة للمؤشرات الفنية متعددة الإطارات إذا كانت مفعلة"""
+    try:
+        # التحقق من تفعيل إرسال رسائل الإطارات
+        if not SEND_FRAMES_MESSAGES:
+            return
+        
+        if not multi_tf_indicators:
+            logger.debug(f"[FRAMES_MSG] لا توجد مؤشرات متعددة الإطارات للرمز {symbol}")
+            return
+        
+        # تنسيق الرسالة
+        frames_message = format_multi_timeframe_indicators_message(symbol, symbol_info, multi_tf_indicators)
+        
+        # إرسال الرسالة
+        try:
+            bot.send_message(
+                chat_id=user_id,
+                text=frames_message,
+                parse_mode='Markdown'
+            )
+            logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات للمستخدم {user_id} للرمز {symbol}")
+        except Exception as send_error:
+            logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة مؤشرات الإطارات للمستخدم {user_id}: {send_error}")
+            
+    except Exception as e:
+        logger.error(f"[FRAMES_MSG] خطأ في إرسال رسالة مؤشرات الإطارات: {e}")
 
 def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, multi_tf_indicators: Dict) -> str:
     """تنسيق رسالة المؤشرات الفنية متعددة الإطارات"""
@@ -7807,23 +7970,24 @@ class GeminiAnalyzer:
             ask = price_data.get('ask', 0)
             spread = price_data.get('spread', 0)
             
-            # المؤشرات الفنية الجديدة متعددة الإطارات للتحليل الخلفي المحسن
-            try:
-                logger.info(f"[AUTO_AI_INDICATORS] جلب المؤشرات متعددة الإطارات للتحليل الآلي للرمز {symbol}")
-                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
-                # استخدام المؤشرات الجديدة في التحليل الخلفي
-                indicators = self._consolidate_multi_tf_indicators_for_background_analysis(multi_tf_indicators)
-                logger.info(f"[AUTO_AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للتحليل الخلفي للرمز {symbol}")
-            except Exception as indicators_error:
-                logger.error(f"[AUTO_AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
-                # fallback للمؤشرات القديمة
-                indicators = technical_data.get('indicators', {}) if technical_data else {}
-            
-            # تجميع جميع البيانات للتحليل الخلفي
-            background_prompt = self._build_enhanced_background_prompt(
-                symbol, current_price, bid, ask, spread, indicators, 
-                trading_mode, capital, timezone_str
-            )
+                    # المؤشرات الفنية الجديدة متعددة الإطارات للتحليل الخلفي المحسن
+        multi_tf_indicators = None
+        try:
+            logger.info(f"[AUTO_AI_INDICATORS] جلب المؤشرات متعددة الإطارات للتحليل الآلي للرمز {symbol}")
+            multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+            # استخدام المؤشرات الجديدة في التحليل الخلفي
+            indicators = self._consolidate_multi_tf_indicators_for_background_analysis(multi_tf_indicators)
+            logger.info(f"[AUTO_AI_INDICATORS] تم تحضير المؤشرات متعددة الإطارات للتحليل الخلفي للرمز {symbol}")
+        except Exception as indicators_error:
+            logger.error(f"[AUTO_AI_INDICATORS] خطأ في جلب المؤشرات متعددة الإطارات للرمز {symbol}: {indicators_error}")
+            # fallback للمؤشرات القديمة
+            indicators = technical_data.get('indicators', {}) if technical_data else {}
+        
+        # تجميع جميع البيانات للتحليل الخلفي مع بيانات الفريمات الكاملة
+        background_prompt = self._build_enhanced_background_prompt(
+            symbol, current_price, bid, ask, spread, indicators, 
+            trading_mode, capital, timezone_str, multi_tf_indicators
+        )
             
             # تحليل خلفي عبر AI لجميع هذه البيانات
             ai_background_analysis = self._send_to_gemini(background_prompt)
@@ -7876,7 +8040,7 @@ class GeminiAnalyzer:
             return multi_tf_indicators.get('M15', {}).get('indicators', {}) if multi_tf_indicators else {}
     
     def _build_enhanced_background_prompt(self, symbol: str, current_price: float, bid: float, ask: float, 
-                                        spread: float, indicators: Dict, trading_mode: str, capital: float, timezone_str: str) -> str:
+                                        spread: float, indicators: Dict, trading_mode: str, capital: float, timezone_str: str, multi_tf_indicators: Dict = None) -> str:
         """بناء prompt للتحليل الخلفي المحسن باستخدام جميع البيانات من التحليل اليدوي"""
         
         # جمع جميع المؤشرات المذكورة في التحليل اليدوي
@@ -7935,8 +8099,28 @@ class GeminiAnalyzer:
         - نسبة الحجم: {volume_ratio:.2f}x
         - تفسير الحجم: {volume_interpretation}
 
+        **المؤشرات متعددة الإطارات الزمنية:**"""
+
+        # إضافة بيانات الفريمات المتعددة إذا كانت متاحة
+        if multi_tf_indicators:
+            for tf_name, tf_data in multi_tf_indicators.items():
+                if tf_data and 'indicators' in tf_data:
+                    tf_indicators = tf_data['indicators']
+                    prompt += f"""
+        [{tf_name}] - {['5 دقائق', '15 دقيقة', '30 دقيقة', '60 دقيقة'][['M5', 'M15', 'M30', 'M60'].index(tf_name)] if tf_name in ['M5', 'M15', 'M30', 'M60'] else tf_name}:
+          • RSI: {tf_indicators.get('rsi', 'N/A')} ({tf_indicators.get('rsi_interpretation', 'غير متوفر')})
+          • MACD: {tf_indicators.get('macd', {}).get('macd', 'N/A')} | Signal: {tf_indicators.get('macd', {}).get('signal', 'N/A')} | Histogram: {tf_indicators.get('macd', {}).get('histogram', 'N/A')}
+          • MA9: {tf_indicators.get('ma_9', 'N/A')} | MA21: {tf_indicators.get('ma_21', 'N/A')}
+          • Stochastic %K: {tf_indicators.get('stochastic', {}).get('k', 'N/A')} | %D: {tf_indicators.get('stochastic', {}).get('d', 'N/A')}
+          • ATR: {tf_indicators.get('atr', 'N/A')}
+          • الحجم: {tf_indicators.get('current_volume', 'N/A')} (نسبة: {tf_indicators.get('volume_ratio', 'N/A')}x)"""
+        else:
+            prompt += "\n        [غير متاح - فشل في جلب بيانات الفريمات المتعددة]"
+
+        prompt += """
+
         **المطلوب منك:**
-        قم بتحليل شامل في الخلفية لجميع هذه البيانات واعطني:
+        قم بتحليل شامل في الخلفية لجميع هذه البيانات (تركز بشكل خاص على المؤشرات متعددة الإطارات) واعطني:
 
         1. **نسبة ثقة محسنة** (0-100%): بناءً على تحليل شامل لجميع المؤشرات
         2. **تقييم المخاطر** (منخفض/متوسط/عالي): بناءً على التقلبات والمؤشرات
@@ -9732,6 +9916,26 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
                     logger.error(f"[ERROR] فشل إرسال الرسالة حتى بدون تنسيق: {e2}")
                     return
         
+        # إرسال رسالة المؤشرات متعددة الإطارات إذا كانت مفعلة
+        try:
+            if SEND_FRAMES_MESSAGES and fresh_analysis and isinstance(fresh_analysis, dict):
+                # جلب المؤشرات متعددة الإطارات من التحليل إذا كانت موجودة
+                multi_tf_indicators = fresh_analysis.get('multi_tf_indicators')
+                
+                # إذا لم تكن متوفرة، حسابها الآن
+                if not multi_tf_indicators:
+                    logger.debug(f"[FRAMES_MSG] حساب المؤشرات متعددة الإطارات للرمز {symbol}")
+                    multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+                
+                # إرسال رسالة المؤشرات
+                if multi_tf_indicators:
+                    send_frames_indicators_message(user_id, symbol, symbol_info, multi_tf_indicators)
+                    logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات مع التنبيه للمستخدم {user_id}")
+                else:
+                    logger.debug(f"[FRAMES_MSG] لا توجد مؤشرات متعددة الإطارات للرمز {symbol}")
+        except Exception as frames_error:
+            logger.error(f"[FRAMES_MSG] خطأ في إرسال رسالة مؤشرات الإطارات: {frames_error}")
+        
         # تسجيل وقت الإرسال
         frequency_manager.record_notification_sent(user_id, symbol)
         
@@ -11131,15 +11335,25 @@ def handle_single_symbol_analysis(call):
             
             logger.info(f"[SUCCESS] تم إرسال تحليل الرمز {symbol} للمستخدم {user_id}")
             
-            # حساب المؤشرات الفنية متعددة الإطارات في الخلفية للـ AI (بدون إرسال للمستخدم)
+            # حساب المؤشرات الفنية متعددة الإطارات في الخلفية للـ AI وإرسالها للمستخدم إذا كانت مفعلة
             try:
                 logger.info(f"[INDICATORS_BACKGROUND] حساب المؤشرات متعددة الإطارات في الخلفية للرمز {symbol}")
                 
-                # حساب المؤشرات على الفريمات المختلفة للـ AI فقط
+                # حساب المؤشرات على الفريمات المختلفة
                 multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
                 
                 if multi_tf_indicators:
                     logger.info(f"[SUCCESS] تم حساب المؤشرات متعددة الإطارات في الخلفية للرمز {symbol}")
+                    
+                    # إرسال رسالة المؤشرات للمستخدم إذا كانت مفعلة
+                    if SEND_FRAMES_MESSAGES:
+                        try:
+                            send_frames_indicators_message(user_id, symbol, symbol_info, multi_tf_indicators)
+                            logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات مع التحليل اليدوي للمستخدم {user_id}")
+                        except Exception as frames_send_error:
+                            logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة مؤشرات الإطارات: {frames_send_error}")
+                    else:
+                        logger.debug(f"[FRAMES_MSG] إرسال رسائل الإطارات معطل - البيانات متاحة للـ AI فقط")
                 else:
                     logger.warning(f"[WARNING] لا توجد مؤشرات متاحة في الخلفية للرمز {symbol}")
                     
@@ -12133,6 +12347,11 @@ def handle_help(call):
    • اذهب للإعدادات → اختيار الرموز للمراقبة
    • ستصلك إشعارات ذكية مخصصة كل 30 ثانية
    • التحليل يراعي نمط التداول ورأس المال
+
+📈 **رسائل المؤشرات متعددة الإطارات:**
+   • استخدم الأمر `/send_frames_msg` لتفعيل/إلغاء تفعيل
+   • ستصلك رسائل منفصلة تحتوي على مؤشرات M5, M15, M30, M60
+   • تُرسل مع كل تحليل يدوي وإشعار آلي
 
 3️⃣ **نظام التقييم والتعلم:**
    • اضغط 👍 للإشارات الدقيقة، 👎 للخاطئة
