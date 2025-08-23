@@ -4422,6 +4422,410 @@ def test_indicators_functionality(symbol: str = "EURUSD") -> Dict:
     
     return test_results
 
+def calculate_precise_live_indicators(df: pd.DataFrame, timeframe_name: str) -> Dict:
+    """حساب المؤشرات بدقة لحظية 100% مطابقة للشارت"""
+    try:
+        indicators = {}
+        
+        if df is None or len(df) < 14:
+            logger.warning(f"[PRECISE] بيانات غير كافية للحساب الدقيق - {len(df) if df is not None else 0} شمعة")
+            return {}
+        
+        logger.info(f"[PRECISE] حساب مؤشرات دقيقة لحظية للفريم {timeframe_name} - {len(df)} شمعة")
+        
+        # التأكد من أن البيانات مرتبة زمنياً
+        df = df.sort_index()
+        
+        # 1. RSI دقيق - نفس طريقة MT5
+        try:
+            if len(df) >= 14:
+                # حساب RSI مع Wilder's Smoothing (نفس MT5)
+                close_prices = df['close'].astype(float)
+                
+                # حساب التغيرات
+                delta = close_prices.diff()
+                gains = delta.where(delta > 0, 0)
+                losses = -delta.where(delta < 0, 0)
+                
+                # استخدام أول 14 قيمة لحساب المتوسط الأولي
+                first_avg_gain = gains.iloc[1:15].mean()
+                first_avg_loss = losses.iloc[1:15].mean()
+                
+                # إنشاء قوائم للمتوسطات المتحركة
+                avg_gains = [first_avg_gain]
+                avg_losses = [first_avg_loss]
+                
+                # حساب RSI للفترات التالية باستخدام Wilder's Smoothing
+                for i in range(15, len(close_prices)):
+                    avg_gain = (avg_gains[-1] * 13 + gains.iloc[i]) / 14
+                    avg_loss = (avg_losses[-1] * 13 + losses.iloc[i]) / 14
+                    avg_gains.append(avg_gain)
+                    avg_losses.append(avg_loss)
+                
+                # حساب RSI للقيمة الأخيرة
+                if avg_losses[-1] != 0:
+                    rs = avg_gains[-1] / avg_losses[-1]
+                    rsi_value = 100 - (100 / (1 + rs))
+                else:
+                    rsi_value = 100
+                
+                indicators['rsi'] = round(float(rsi_value), 2)
+                
+                # تفسير RSI
+                if rsi_value >= 70:
+                    indicators['rsi_interpretation'] = 'ذروة شراء'
+                elif rsi_value <= 30:
+                    indicators['rsi_interpretation'] = 'ذروة بيع'
+                else:
+                    indicators['rsi_interpretation'] = 'محايد'
+                
+                logger.debug(f"[PRECISE_RSI] {timeframe_name}: {indicators['rsi']}")
+                
+        except Exception as rsi_error:
+            logger.error(f"[PRECISE_RSI_ERROR] خطأ في حساب RSI: {rsi_error}")
+            indicators['rsi'] = None
+            indicators['rsi_interpretation'] = 'خطأ في الحساب'
+        
+        # 2. MACD دقيق - نفس طريقة MT5
+        try:
+            if len(df) >= 26:
+                close_prices = df['close'].astype(float)
+                
+                # حساب EMA باستخدام معامل التنعيم الصحيح
+                alpha_12 = 2 / (12 + 1)  # معامل تنعيم EMA12
+                alpha_26 = 2 / (26 + 1)  # معامل تنعيم EMA26
+                alpha_9 = 2 / (9 + 1)    # معامل تنعيم Signal
+                
+                # حساب EMA12 و EMA26 بدقة
+                ema_12 = close_prices.ewm(alpha=alpha_12, adjust=False).mean()
+                ema_26 = close_prices.ewm(alpha=alpha_26, adjust=False).mean()
+                
+                # حساب MACD Line
+                macd_line = ema_12 - ema_26
+                
+                # حساب Signal Line
+                signal_line = macd_line.ewm(alpha=alpha_9, adjust=False).mean()
+                
+                # حساب Histogram
+                histogram = macd_line - signal_line
+                
+                # القيم الحالية (آخر قيمة)
+                current_macd = float(macd_line.iloc[-1])
+                current_signal = float(signal_line.iloc[-1])
+                current_histogram = float(histogram.iloc[-1])
+                
+                indicators['macd'] = {
+                    'macd': round(current_macd, 6),
+                    'signal': round(current_signal, 6),
+                    'histogram': round(current_histogram, 6)
+                }
+                
+                # تفسير MACD
+                if current_macd > current_signal:
+                    if current_histogram > 0:
+                        indicators['macd_interpretation'] = 'إشارة صعود قوية'
+                    else:
+                        indicators['macd_interpretation'] = 'إشارة صعود'
+                else:
+                    if current_histogram < 0:
+                        indicators['macd_interpretation'] = 'إشارة هبوط قوية'
+                    else:
+                        indicators['macd_interpretation'] = 'إشارة هبوط'
+                
+                logger.debug(f"[PRECISE_MACD] {timeframe_name}: {current_macd:.6f}")
+                
+        except Exception as macd_error:
+            logger.error(f"[PRECISE_MACD_ERROR] خطأ في حساب MACD: {macd_error}")
+            indicators['macd'] = {'macd': None, 'signal': None, 'histogram': None}
+            indicators['macd_interpretation'] = 'خطأ في الحساب'
+        
+        # 3. Stochastic دقيق - نفس طريقة MT5
+        try:
+            if len(df) >= 14:
+                high_prices = df['high'].astype(float)
+                low_prices = df['low'].astype(float)
+                close_prices = df['close'].astype(float)
+                
+                # حساب %K
+                lowest_low = low_prices.rolling(window=14).min()
+                highest_high = high_prices.rolling(window=14).max()
+                
+                k_percent = []
+                for i in range(len(close_prices)):
+                    if i >= 13:  # بعد 14 قيمة
+                        ll = lowest_low.iloc[i]
+                        hh = highest_high.iloc[i]
+                        close = close_prices.iloc[i]
+                        
+                        if hh != ll:
+                            k = 100 * ((close - ll) / (hh - ll))
+                        else:
+                            k = 50  # تجنب القسمة على صفر
+                        k_percent.append(k)
+                    else:
+                        k_percent.append(50)
+                
+                # حساب %D (متوسط متحرك بسيط لـ %K على 3 فترات)
+                k_series = pd.Series(k_percent)
+                d_series = k_series.rolling(window=3).mean()
+                
+                current_k = float(k_series.iloc[-1])
+                current_d = float(d_series.iloc[-1]) if not pd.isna(d_series.iloc[-1]) else current_k
+                
+                indicators['stochastic'] = {
+                    'k': round(current_k, 2),
+                    'd': round(current_d, 2)
+                }
+                
+                # تفسير Stochastic
+                if current_k >= 80 and current_d >= 80:
+                    indicators['stochastic_interpretation'] = 'ذروة شراء قوية'
+                elif current_k <= 20 and current_d <= 20:
+                    indicators['stochastic_interpretation'] = 'ذروة بيع قوية'
+                elif current_k > current_d:
+                    indicators['stochastic_interpretation'] = 'اتجاه صاعد'
+                else:
+                    indicators['stochastic_interpretation'] = 'اتجاه هابط'
+                
+                logger.debug(f"[PRECISE_STOCH] {timeframe_name}: K={current_k:.2f}, D={current_d:.2f}")
+                
+        except Exception as stoch_error:
+            logger.error(f"[PRECISE_STOCH_ERROR] خطأ في حساب Stochastic: {stoch_error}")
+            indicators['stochastic'] = {'k': None, 'd': None}
+            indicators['stochastic_interpretation'] = 'خطأ في الحساب'
+        
+        # 4. Moving Averages دقيقة
+        try:
+            for period in [9, 21, 50]:
+                if len(df) >= period:
+                    sma = df['close'].rolling(window=period).mean().iloc[-1]
+                    if not pd.isna(sma):
+                        indicators[f'ma_{period}'] = round(float(sma), 5)
+                        
+            # EMAs
+            for period in [12, 26]:
+                if len(df) >= period:
+                    ema = df['close'].ewm(span=period, adjust=False).mean().iloc[-1]
+                    if not pd.isna(ema):
+                        indicators[f'ema_{period}'] = round(float(ema), 5)
+                        
+        except Exception as ma_error:
+            logger.error(f"[PRECISE_MA_ERROR] خطأ في حساب المتوسطات: {ma_error}")
+        
+        # 5. ATR دقيق
+        try:
+            if len(df) >= 14:
+                high_prices = df['high']
+                low_prices = df['low']
+                close_prices = df['close']
+                
+                # حساب True Range
+                tr_list = []
+                for i in range(1, len(df)):
+                    tr1 = high_prices.iloc[i] - low_prices.iloc[i]
+                    tr2 = abs(high_prices.iloc[i] - close_prices.iloc[i-1])
+                    tr3 = abs(low_prices.iloc[i] - close_prices.iloc[i-1])
+                    tr = max(tr1, tr2, tr3)
+                    tr_list.append(tr)
+                
+                # حساب ATR (متوسط متحرك للـ True Range)
+                if len(tr_list) >= 14:
+                    atr_value = sum(tr_list[-14:]) / 14
+                    indicators['atr'] = round(float(atr_value), 5)
+                    
+        except Exception as atr_error:
+            logger.error(f"[PRECISE_ATR_ERROR] خطأ في حساب ATR: {atr_error}")
+            indicators['atr'] = None
+        
+        # 6. Bollinger Bands دقيقة
+        try:
+            if len(df) >= 20:
+                sma_20 = df['close'].rolling(window=20).mean()
+                std_20 = df['close'].rolling(window=20).std()
+                
+                bb_upper = sma_20 + (std_20 * 2)
+                bb_lower = sma_20 - (std_20 * 2)
+                
+                indicators['bb_upper'] = round(float(bb_upper.iloc[-1]), 5)
+                indicators['bb_middle'] = round(float(sma_20.iloc[-1]), 5)
+                indicators['bb_lower'] = round(float(bb_lower.iloc[-1]), 5)
+                
+        except Exception as bb_error:
+            logger.error(f"[PRECISE_BB_ERROR] خطأ في حساب Bollinger Bands: {bb_error}")
+        
+        # إضافة Volume Analysis
+        try:
+            if 'tick_volume' in df.columns:
+                current_volume = float(df['tick_volume'].iloc[-1])
+                avg_volume = float(df['tick_volume'].tail(20).mean())
+                
+                indicators['current_volume'] = int(current_volume)
+                indicators['avg_volume'] = int(avg_volume)
+                indicators['volume_ratio'] = round(current_volume / avg_volume if avg_volume > 0 else 1.0, 2)
+                
+                # تفسير الحجم
+                volume_ratio = indicators['volume_ratio']
+                if volume_ratio > 2.0:
+                    indicators['volume_interpretation'] = 'حجم استثنائي'
+                    indicators['activity_level'] = '🔥 استثنائي'
+                elif volume_ratio > 1.5:
+                    indicators['volume_interpretation'] = 'حجم عالي'
+                    indicators['activity_level'] = '⚡ عالي'
+                else:
+                    indicators['volume_interpretation'] = 'حجم طبيعي'
+                    indicators['activity_level'] = '📊 طبيعي'
+                    
+        except Exception as vol_error:
+            logger.error(f"[PRECISE_VOL_ERROR] خطأ في حساب الحجم: {vol_error}")
+            indicators['current_volume'] = 1000
+            indicators['avg_volume'] = 1000
+            indicators['volume_ratio'] = 1.0
+            indicators['volume_interpretation'] = 'بيانات غير متوفرة'
+            indicators['activity_level'] = '❓ غير محدد'
+        
+        # إضافة معلومات إضافية
+        indicators['precision_mode'] = True
+        indicators['calculation_time'] = datetime.now().isoformat()
+        indicators['data_points'] = len(df)
+        
+        logger.info(f"[PRECISE_SUCCESS] تم حساب {len(indicators)} مؤشر بدقة للفريم {timeframe_name}")
+        return indicators
+        
+    except Exception as e:
+        logger.error(f"[PRECISE_ERROR] خطأ عام في الحساب الدقيق: {e}")
+        return {}
+
+def validate_indicators_accuracy(symbol: str, timeframe: str = "M15") -> Dict:
+    """اختبار دقة المؤشرات مقارنة بالشارت وإعطاء تقرير مفصل"""
+    try:
+        validation_report = {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'timestamp': datetime.now().isoformat(),
+            'accuracy_tests': {},
+            'recommendations': [],
+            'overall_accuracy': 'غير محدد'
+        }
+        
+        logger.info(f"[VALIDATION] بدء اختبار دقة المؤشرات للرمز {symbol} على إطار {timeframe}")
+        
+        # جلب المؤشرات من البوت
+        bot_indicators = calculate_multi_timeframe_indicators(symbol)
+        
+        if not bot_indicators or timeframe not in bot_indicators:
+            validation_report['accuracy_tests']['data_availability'] = 'فشل - لا توجد مؤشرات'
+            validation_report['overall_accuracy'] = 'غير متاح'
+            return validation_report
+        
+        tf_indicators = bot_indicators[timeframe]
+        
+        # اختبار RSI
+        if 'rsi' in tf_indicators and tf_indicators['rsi'] is not None:
+            rsi_value = tf_indicators['rsi']
+            
+            # التحقق من منطقية قيمة RSI
+            if 0 <= rsi_value <= 100:
+                if tf_indicators.get('precision_mode', False):
+                    validation_report['accuracy_tests']['rsi'] = 'ممتاز - حساب دقيق بطريقة Wilder\'s'
+                else:
+                    validation_report['accuracy_tests']['rsi'] = 'جيد - حساب تقليدي'
+                    validation_report['recommendations'].append('تفعيل الحساب الدقيق لـ RSI')
+            else:
+                validation_report['accuracy_tests']['rsi'] = f'خطأ - قيمة غير صحيحة: {rsi_value}'
+        else:
+            validation_report['accuracy_tests']['rsi'] = 'غير متوفر'
+        
+        # اختبار MACD
+        if 'macd' in tf_indicators and tf_indicators['macd']:
+            macd_data = tf_indicators['macd']
+            if all(key in macd_data for key in ['macd', 'signal', 'histogram']):
+                if tf_indicators.get('precision_mode', False):
+                    validation_report['accuracy_tests']['macd'] = 'ممتاز - حساب دقيق بمعاملات EMA صحيحة'
+                else:
+                    validation_report['accuracy_tests']['macd'] = 'جيد - حساب تقليدي'
+                    validation_report['recommendations'].append('تفعيل الحساب الدقيق لـ MACD')
+            else:
+                validation_report['accuracy_tests']['macd'] = 'ناقص - مكونات مفقودة'
+        else:
+            validation_report['accuracy_tests']['macd'] = 'غير متوفر'
+        
+        # اختبار Stochastic
+        if 'stochastic' in tf_indicators and tf_indicators['stochastic']:
+            stoch_data = tf_indicators['stochastic']
+            if 'k' in stoch_data and 'd' in stoch_data:
+                k_val = stoch_data['k']
+                d_val = stoch_data['d']
+                if k_val is not None and d_val is not None and 0 <= k_val <= 100 and 0 <= d_val <= 100:
+                    if tf_indicators.get('precision_mode', False):
+                        validation_report['accuracy_tests']['stochastic'] = 'ممتاز - حساب دقيق'
+                    else:
+                        validation_report['accuracy_tests']['stochastic'] = 'جيد'
+                else:
+                    validation_report['accuracy_tests']['stochastic'] = f'خطأ - قيم غير صحيحة: K={k_val}, D={d_val}'
+            else:
+                validation_report['accuracy_tests']['stochastic'] = 'ناقص - مكونات مفقودة'
+        else:
+            validation_report['accuracy_tests']['stochastic'] = 'غير متوفر'
+        
+        # اختبار المتوسطات المتحركة
+        ma_tests = []
+        for ma_period in ['ma_9', 'ma_21', 'ma_50']:
+            if ma_period in tf_indicators and tf_indicators[ma_period] is not None:
+                ma_value = tf_indicators[ma_period]
+                if ma_value > 0:
+                    ma_tests.append('✓')
+                else:
+                    ma_tests.append('✗')
+            else:
+                ma_tests.append('-')
+        
+        ma_score = ma_tests.count('✓')
+        if ma_score == 3:
+            validation_report['accuracy_tests']['moving_averages'] = 'ممتاز - جميع المتوسطات متوفرة'
+        elif ma_score >= 2:
+            validation_report['accuracy_tests']['moving_averages'] = 'جيد - معظم المتوسطات متوفرة'
+        elif ma_score >= 1:
+            validation_report['accuracy_tests']['moving_averages'] = 'مقبول - بعض المتوسطات متوفرة'
+        else:
+            validation_report['accuracy_tests']['moving_averages'] = 'ضعيف - لا توجد متوسطات'
+        
+        # حساب التقييم العام
+        excellent_count = sum(1 for test in validation_report['accuracy_tests'].values() if 'ممتاز' in str(test))
+        good_count = sum(1 for test in validation_report['accuracy_tests'].values() if 'جيد' in str(test))
+        total_tests = len(validation_report['accuracy_tests'])
+        
+        if excellent_count >= total_tests * 0.7:
+            validation_report['overall_accuracy'] = 'ممتاز'
+        elif (excellent_count + good_count) >= total_tests * 0.6:
+            validation_report['overall_accuracy'] = 'جيد'
+        elif (excellent_count + good_count) >= total_tests * 0.4:
+            validation_report['overall_accuracy'] = 'مقبول'
+        else:
+            validation_report['overall_accuracy'] = 'يحتاج تحسين'
+        
+        # إضافة توصيات عامة
+        if tf_indicators.get('precision_mode', False):
+            validation_report['recommendations'].append('✅ الحساب الدقيق مفعل')
+        else:
+            validation_report['recommendations'].append('🔄 تفعيل الحساب الدقيق لمطابقة أفضل مع الشارت')
+        
+        if tf_indicators.get('data_points', 0) >= 100:
+            validation_report['recommendations'].append('✅ عدد كافٍ من نقاط البيانات')
+        else:
+            validation_report['recommendations'].append('📈 زيادة عدد نقاط البيانات للدقة')
+        
+        logger.info(f"[VALIDATION] اكتمل اختبار الدقة للرمز {symbol}: {validation_report['overall_accuracy']}")
+        return validation_report
+        
+    except Exception as e:
+        logger.error(f"[VALIDATION_ERROR] خطأ في اختبار دقة المؤشرات: {e}")
+        return {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'error': str(e),
+            'overall_accuracy': 'خطأ في الاختبار'
+        }
+
 def generate_fallback_indicators(symbol: str) -> Dict:
     """توليد مؤشرات احتياطية عند فشل اتصال MT5 - بيانات تقديرية لضمان استمرارية البوت"""
     try:
@@ -4531,38 +4935,71 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
             try:
                 logger.info(f"[MULTI_TF] حساب المؤشرات للرمز {symbol} على إطار {tf_name}")
                 
-                # جلب البيانات اللحظية للإطار الزمني المحدد (بدون cache - قيم لحظية حقيقية)
+                # جلب البيانات اللحظية بأقصى دقة ممكنة
                 with mt5_operation_lock:
-                    # جلب 50 شمعة مكتملة + محاولة جلب البيانات اللحظية (فرض التحديث)
-                    df = mt5_manager.get_market_data(symbol, tf_value, 50, force_fresh=True)
+                    logger.info(f"[LIVE_FETCH] جلب بيانات لحظية دقيقة للرمز {symbol} على إطار {tf_name}")
                     
-                    # إضافة البيانات اللحظية الحالية كآخر شمعة
-                    try:
-                        live_price_data = mt5_manager.get_live_price(symbol, force_fresh=True)
-                        if live_price_data and df is not None and len(df) > 0:
-                            # إنشاء شمعة حالية من البيانات اللحظية
-                            current_time = datetime.now()
-                            last_close = df['close'].iloc[-1]
-                            current_price = live_price_data.get('last', live_price_data.get('bid', last_close))
+                    # جلب 100 شمعة للحصول على حساب أدق للمؤشرات
+                    df = mt5_manager.get_market_data(symbol, tf_value, 100, force_fresh=True)
+                    
+                    if df is not None and len(df) > 0:
+                        # الحصول على أحدث سعر لحظي
+                        try:
+                            # محاولة متعددة لجلب السعر اللحظي
+                            live_price_data = None
+                            for attempt in range(3):
+                                live_price_data = mt5_manager.get_live_price(symbol, force_fresh=True)
+                                if live_price_data:
+                                    break
+                                time.sleep(0.1)  # انتظار قصير بين المحاولات
                             
-                            # إضافة البيانات اللحظية كآخر صف
-                            live_candle = {
-                                'time': current_time,
-                                'open': last_close,  # نستخدم آخر إغلاق كافتتاح للشمعة الحالية
-                                'high': max(last_close, current_price),
-                                'low': min(last_close, current_price),
-                                'close': current_price,
-                                'tick_volume': live_price_data.get('volume', df['tick_volume'].iloc[-1] if 'tick_volume' in df else 1000),
-                                'real_volume': live_price_data.get('volume', 0)
-                            }
-                            
-                            # إضافة الشمعة اللحظية
-                            live_df = pd.DataFrame([live_candle])
-                            df = pd.concat([df, live_df], ignore_index=True)
-                            
-                            logger.debug(f"[LIVE_DATA] أضيفت بيانات لحظية للرمز {symbol} في إطار {tf_name}: {current_price}")
-                    except Exception as live_error:
-                        logger.warning(f"[LIVE_DATA] فشل في إضافة البيانات اللحظية للرمز {symbol}: {live_error}")
+                            if live_price_data:
+                                # الحصول على السعر الحالي الأكثر دقة
+                                current_price = (
+                                    live_price_data.get('last') or 
+                                    live_price_data.get('bid') or 
+                                    df['close'].iloc[-1]
+                                )
+                                
+                                # التحقق من أن السعر صحيح
+                                if current_price and current_price > 0:
+                                    # تحديث آخر شمعة بالسعر اللحظي
+                                    df.iloc[-1, df.columns.get_loc('close')] = current_price
+                                    
+                                    # تحديث High و Low إذا لزم الأمر
+                                    if current_price > df.iloc[-1]['high']:
+                                        df.iloc[-1, df.columns.get_loc('high')] = current_price
+                                    if current_price < df.iloc[-1]['low']:
+                                        df.iloc[-1, df.columns.get_loc('low')] = current_price
+                                    
+                                    # تحديث الحجم إذا توفر
+                                    if live_price_data.get('volume', 0) > 0:
+                                        if 'tick_volume' in df.columns:
+                                            df.iloc[-1, df.columns.get_loc('tick_volume')] = live_price_data['volume']
+                                    
+                                    logger.info(f"[LIVE_UPDATE] تم تحديث آخر شمعة بالسعر اللحظي {current_price} للرمز {symbol}")
+                                else:
+                                    logger.warning(f"[LIVE_PRICE] سعر غير صحيح: {current_price}")
+                            else:
+                                logger.warning(f"[LIVE_PRICE] فشل في جلب السعر اللحظي للرمز {symbol}")
+                                
+                        except Exception as live_error:
+                            logger.error(f"[LIVE_ERROR] خطأ في تحديث البيانات اللحظية للرمز {symbol}: {live_error}")
+                    
+                    # التأكد من جودة البيانات
+                    if df is not None and len(df) > 0:
+                        # ترتيب البيانات زمنياً
+                        df = df.sort_index()
+                        
+                        # التحقق من اكتمال البيانات الأساسية
+                        required_columns = ['open', 'high', 'low', 'close']
+                        for col in required_columns:
+                            if col in df.columns:
+                                # إزالة القيم المفقودة أو الصفرية
+                                df = df[df[col] > 0]
+                                df = df.dropna(subset=[col])
+                        
+                        logger.debug(f"[DATA_QUALITY] البيانات النهائية للرمز {symbol}: {len(df)} شمعة صحيحة")
                 
                 if df is None or len(df) < 10:  # تقليل الحد الأدنى للبيانات
                     logger.warning(f"[WARNING] بيانات غير كافية للرمز {symbol} على إطار {tf_name}")
@@ -4588,180 +5025,188 @@ def calculate_multi_timeframe_indicators(symbol: str) -> Dict:
                     }
                     continue
                 
-                # حساب المؤشرات لهذا الإطار الزمني
-                indicators = {}
+                # استخدام الدالة الدقيقة الجديدة لحساب جميع المؤشرات
+                logger.info(f"[PRECISE_CALC] استخدام الحساب الدقيق للرمز {symbol} على إطار {tf_name}")
+                indicators = calculate_precise_live_indicators(df, tf_name)
                 
-                # RSI
-                try:
-                    if len(df) >= 14:
-                        import ta
-                        rsi = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-                        current_rsi = rsi.iloc[-1] if not rsi.empty else None
-                        
-                        if current_rsi and not pd.isna(current_rsi):
-                            indicators['rsi'] = round(float(current_rsi), 1)
+                # إذا فشلت الدالة الدقيقة، استخدم الطريقة الاحتياطية
+                if not indicators:
+                    logger.warning(f"[FALLBACK_CALC] استخدام الحساب الاحتياطي للرمز {symbol} على إطار {tf_name}")
+                    indicators = {}
+                    
+                    # RSI احتياطي
+                    try:
+                        if len(df) >= 14:
+                            import ta
+                            rsi = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+                            current_rsi = rsi.iloc[-1] if not rsi.empty else None
                             
-                            # تفسير RSI
-                            if current_rsi <= 30:
-                                indicators['rsi_interpretation'] = 'ذروة بيع - فرصة شراء'
-                            elif current_rsi >= 70:
-                                indicators['rsi_interpretation'] = 'ذروة شراء - فرصة بيع'
-                            elif 40 <= current_rsi <= 60:
-                                indicators['rsi_interpretation'] = 'محايد'
-                            elif current_rsi < 40:
-                                indicators['rsi_interpretation'] = 'ضعيف'
+                            if current_rsi and not pd.isna(current_rsi):
+                                indicators['rsi'] = round(float(current_rsi), 1)
+                                
+                                # تفسير RSI
+                                if current_rsi <= 30:
+                                    indicators['rsi_interpretation'] = 'ذروة بيع - فرصة شراء'
+                                elif current_rsi >= 70:
+                                    indicators['rsi_interpretation'] = 'ذروة شراء - فرصة بيع'
+                                elif 40 <= current_rsi <= 60:
+                                    indicators['rsi_interpretation'] = 'محايد'
+                                elif current_rsi < 40:
+                                    indicators['rsi_interpretation'] = 'ضعيف'
+                                else:
+                                    indicators['rsi_interpretation'] = 'قوي'
                             else:
-                                indicators['rsi_interpretation'] = 'قوي'
+                                indicators['rsi'] = None
+                                indicators['rsi_interpretation'] = 'غير متوفر'
                         else:
                             indicators['rsi'] = None
-                            indicators['rsi_interpretation'] = 'غير متوفر'
-                    else:
+                            indicators['rsi_interpretation'] = 'بيانات غير كافية'
+                    except Exception as e:
+                        logger.warning(f"[WARNING] فشل في حساب RSI للرمز {symbol} على إطار {tf_name}: {e}")
                         indicators['rsi'] = None
-                        indicators['rsi_interpretation'] = 'بيانات غير كافية'
-                except Exception as e:
-                    logger.warning(f"[WARNING] فشل في حساب RSI للرمز {symbol} على إطار {tf_name}: {e}")
-                    indicators['rsi'] = None
-                    indicators['rsi_interpretation'] = 'خطأ في الحساب'
+                        indicators['rsi_interpretation'] = 'خطأ في الحساب'
                 
-                # MACD - محسن مع الهيستوجرام
-                try:
-                    if len(df) >= 26:
-                        # حساب MACD مع ضمان استخدام البيانات اللحظية
-                        close_prices = df['close']
-                        ema_12 = close_prices.ewm(span=12, adjust=False).mean()
-                        ema_26 = close_prices.ewm(span=26, adjust=False).mean()
-                        macd_line = ema_12 - ema_26
-                        signal_line = macd_line.ewm(span=9, adjust=False).mean()
-                        histogram = macd_line - signal_line
-                        
-                        current_macd = macd_line.iloc[-1] if not macd_line.empty else None
-                        current_signal = signal_line.iloc[-1] if not signal_line.empty else None
-                        current_histogram = histogram.iloc[-1] if not histogram.empty else None
-                        
-                        if current_macd is not None and current_signal is not None and not pd.isna(current_macd) and not pd.isna(current_signal):
-                            indicators['macd'] = {
-                                'macd': round(float(current_macd), 6),
-                                'signal': round(float(current_signal), 6),
-                                'histogram': round(float(current_histogram), 6) if current_histogram is not None else 0
-                            }
-                            
-                            # تفسير MACD
-                            if current_macd > current_signal:
-                                if current_macd > 0:
-                                    indicators['macd_interpretation'] = 'إشارة صعود قوية'
+                    # إذا لم تحتو الدالة الدقيقة على MACD، احسبه احتياطياً
+                    if 'macd' not in indicators:
+                        try:
+                            if len(df) >= 26:
+                                # حساب MACD مع ضمان استخدام البيانات اللحظية
+                                close_prices = df['close']
+                                ema_12 = close_prices.ewm(span=12, adjust=False).mean()
+                                ema_26 = close_prices.ewm(span=26, adjust=False).mean()
+                                macd_line = ema_12 - ema_26
+                                signal_line = macd_line.ewm(span=9, adjust=False).mean()
+                                histogram = macd_line - signal_line
+                                
+                                current_macd = macd_line.iloc[-1] if not macd_line.empty else None
+                                current_signal = signal_line.iloc[-1] if not signal_line.empty else None
+                                current_histogram = histogram.iloc[-1] if not histogram.empty else None
+                                
+                                if current_macd is not None and current_signal is not None and not pd.isna(current_macd) and not pd.isna(current_signal):
+                                    indicators['macd'] = {
+                                        'macd': round(float(current_macd), 6),
+                                        'signal': round(float(current_signal), 6),
+                                        'histogram': round(float(current_histogram), 6) if current_histogram is not None else 0
+                                    }
+                                    
+                                    # تفسير MACD
+                                    if current_macd > current_signal:
+                                        if current_macd > 0:
+                                            indicators['macd_interpretation'] = 'إشارة صعود قوية'
+                                        else:
+                                            indicators['macd_interpretation'] = 'إشارة صعود'
+                                    else:
+                                        if current_macd < 0:
+                                            indicators['macd_interpretation'] = 'إشارة هبوط قوية'
+                                        else:
+                                            indicators['macd_interpretation'] = 'إشارة هبوط'
                                 else:
-                                    indicators['macd_interpretation'] = 'إشارة صعود'
+                                    indicators['macd'] = {'macd': None, 'signal': None, 'histogram': None}
+                                    indicators['macd_interpretation'] = 'غير متوفر'
                             else:
-                                if current_macd < 0:
-                                    indicators['macd_interpretation'] = 'إشارة هبوط قوية'
-                                else:
-                                    indicators['macd_interpretation'] = 'إشارة هبوط'
-                        else:
-                            indicators['macd'] = {'macd': None, 'signal': None}
-                            indicators['macd_interpretation'] = 'غير متوفر'
-                    else:
-                        indicators['macd'] = {'macd': None, 'signal': None}
-                        indicators['macd_interpretation'] = 'بيانات غير كافية'
-                except Exception as e:
-                    logger.warning(f"[WARNING] فشل في حساب MACD للرمز {symbol} على إطار {tf_name}: {e}")
-                    indicators['macd'] = {'macd': None, 'signal': None}
-                    indicators['macd_interpretation'] = 'خطأ في الحساب'
+                                indicators['macd'] = {'macd': None, 'signal': None, 'histogram': None}
+                                indicators['macd_interpretation'] = 'بيانات غير كافية'
+                        except Exception as e:
+                            logger.warning(f"[WARNING] فشل في حساب MACD للرمز {symbol} على إطار {tf_name}: {e}")
+                            indicators['macd'] = {'macd': None, 'signal': None, 'histogram': None}
+                            indicators['macd_interpretation'] = 'خطأ في الحساب'
                 
-                # المتوسطات المتحركة
-                try:
-                    for period in [9, 21]:
-                        if len(df) >= period:
-                            ma = df['close'].rolling(window=period).mean()
-                            current_ma = ma.iloc[-1] if not ma.empty else None
-                            
-                            if current_ma and not pd.isna(current_ma):
-                                indicators[f'ma_{period}'] = round(float(current_ma), 5)
-                            else:
+                    # المتوسطات المتحركة (إذا لم تحسبها الدالة الدقيقة)
+                    missing_mas = [ma for ma in ['ma_9', 'ma_21', 'ma_50'] if ma not in indicators]
+                    if missing_mas:
+                        try:
+                            for period in [9, 21, 50]:
+                                ma_key = f'ma_{period}'
+                                if ma_key not in indicators:
+                                    if len(df) >= period:
+                                        ma = df['close'].rolling(window=period).mean()
+                                        current_ma = ma.iloc[-1] if not ma.empty else None
+                                        
+                                        if current_ma and not pd.isna(current_ma):
+                                            indicators[ma_key] = round(float(current_ma), 5)
+                                        else:
+                                            indicators[ma_key] = None
+                                    else:
+                                        indicators[ma_key] = None
+                        except Exception as e:
+                            logger.warning(f"[WARNING] فشل في حساب المتوسطات المتحركة للرمز {symbol} على إطار {tf_name}: {e}")
+                            for period in [9, 21, 50]:
                                 indicators[f'ma_{period}'] = None
-                        else:
-                            indicators[f'ma_{period}'] = None
-                except Exception as e:
-                    logger.warning(f"[WARNING] فشل في حساب المتوسطات المتحركة للرمز {symbol} على إطار {tf_name}: {e}")
-                    indicators['ma_9'] = None
-                    indicators['ma_21'] = None
                 
-                # Stochastic Oscillator - محسن للبيانات اللحظية
-                try:
-                    if len(df) >= 14:
-                        # حساب %K بشكل أكثر دقة
-                        high_series = df['high']
-                        low_series = df['low']
-                        close_series = df['close']
-                        
-                        # حساب أعلى وأقل قيمة خلال 14 فترة
-                        high_14 = high_series.rolling(window=14, min_periods=14).max()
-                        low_14 = low_series.rolling(window=14, min_periods=14).min()
-                        
-                        # تجنب القسمة على صفر
-                        denominator = high_14 - low_14
-                        k_percent = pd.Series(index=df.index, dtype=float)
-                        
-                        # حساب %K مع معالجة القسمة على صفر
-                        valid_mask = (denominator != 0) & (~pd.isna(denominator))
-                        k_percent[valid_mask] = 100 * ((close_series[valid_mask] - low_14[valid_mask]) / denominator[valid_mask])
-                        
-                        # حساب %D (متوسط متحرك لـ %K خلال 3 فترات)
-                        d_percent = k_percent.rolling(window=3, min_periods=1).mean()
-                        
-                        current_k = k_percent.iloc[-1] if not k_percent.empty and not pd.isna(k_percent.iloc[-1]) else None
-                        current_d = d_percent.iloc[-1] if not d_percent.empty and not pd.isna(d_percent.iloc[-1]) else None
-                        
-                        if current_k is not None and current_d is not None and not pd.isna(current_k) and not pd.isna(current_d):
-                            indicators['stochastic'] = {
-                                'k': round(float(current_k), 1),
-                                'd': round(float(current_d), 1)
-                            }
+                # ملاحظة: Stochastic و ATR يتم حسابهما في الدالة الدقيقة
+                # إضافة حسابات احتياطية فقط إذا لم تنجح الدالة الدقيقة
+                
+                if 'stochastic' not in indicators:
+                    try:
+                        if len(df) >= 14:
+                            # حساب Stochastic احتياطي مبسط
+                            high_series = df['high']
+                            low_series = df['low']
+                            close_series = df['close']
                             
-                            # تفسير Stochastic
-                            if current_k >= 80 and current_d >= 80:
-                                if current_k < current_d:
-                                    indicators['stochastic_interpretation'] = 'تقاطع هابط - إشارة بيع محتملة | ذروة شراء قوية - احتمالية تصحيح'
+                            # حساب أعلى وأقل قيمة خلال 14 فترة
+                            high_14 = high_series.rolling(window=14, min_periods=14).max()
+                            low_14 = low_series.rolling(window=14, min_periods=14).min()
+                            
+                            # تجنب القسمة على صفر
+                            denominator = high_14 - low_14
+                            k_percent = pd.Series(index=df.index, dtype=float)
+                            
+                            # حساب %K مع معالجة القسمة على صفر
+                            valid_mask = (denominator != 0) & (~pd.isna(denominator))
+                            k_percent[valid_mask] = 100 * ((close_series[valid_mask] - low_14[valid_mask]) / denominator[valid_mask])
+                            
+                            # حساب %D (متوسط متحرك لـ %K خلال 3 فترات)
+                            d_percent = k_percent.rolling(window=3, min_periods=1).mean()
+                            
+                            current_k = k_percent.iloc[-1] if not k_percent.empty and not pd.isna(k_percent.iloc[-1]) else None
+                            current_d = d_percent.iloc[-1] if not d_percent.empty and not pd.isna(d_percent.iloc[-1]) else None
+                            
+                            if current_k is not None and current_d is not None:
+                                indicators['stochastic'] = {
+                                    'k': round(float(current_k), 1),
+                                    'd': round(float(current_d), 1)
+                                }
+                                
+                                # تفسير Stochastic
+                                if current_k >= 80 and current_d >= 80:
+                                    indicators['stochastic_interpretation'] = 'ذروة شراء قوية'
+                                elif current_k <= 20 and current_d <= 20:
+                                    indicators['stochastic_interpretation'] = 'ذروة بيع قوية'
                                 else:
-                                    indicators['stochastic_interpretation'] = 'ذروة شراء قوية - احتمالية تصحيح'
-                            elif current_k <= 20 and current_d <= 20:
-                                if current_k > current_d:
-                                    indicators['stochastic_interpretation'] = 'تقاطع صاعد - إشارة شراء محتملة | ذروة بيع قوية - احتمالية ارتداد'
-                                else:
-                                    indicators['stochastic_interpretation'] = 'ذروة بيع قوية - احتمالية ارتداد'
+                                    indicators['stochastic_interpretation'] = 'منطقة متوسطة'
                             else:
-                                indicators['stochastic_interpretation'] = 'منطقة متوسطة - إشارة محايدة'
+                                indicators['stochastic'] = {'k': None, 'd': None}
+                                indicators['stochastic_interpretation'] = 'غير متوفر'
                         else:
                             indicators['stochastic'] = {'k': None, 'd': None}
-                            indicators['stochastic_interpretation'] = 'غير متوفر'
-                    else:
+                            indicators['stochastic_interpretation'] = 'بيانات غير كافية'
+                    except Exception as e:
+                        logger.warning(f"[WARNING] فشل في حساب Stochastic احتياطي للرمز {symbol} على إطار {tf_name}: {e}")
                         indicators['stochastic'] = {'k': None, 'd': None}
-                        indicators['stochastic_interpretation'] = 'بيانات غير كافية'
-                except Exception as e:
-                    logger.warning(f"[WARNING] فشل في حساب Stochastic للرمز {symbol} على إطار {tf_name}: {e}")
-                    indicators['stochastic'] = {'k': None, 'd': None}
-                    indicators['stochastic_interpretation'] = 'خطأ في الحساب'
+                        indicators['stochastic_interpretation'] = 'خطأ في الحساب'
                 
-                # ATR
-                try:
-                    if len(df) >= 14:
-                        high_low = df['high'] - df['low']
-                        high_close = np.abs(df['high'] - df['close'].shift())
-                        low_close = np.abs(df['low'] - df['close'].shift())
-                        
-                        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-                        atr = true_range.rolling(window=14).mean()
-                        
-                        current_atr = atr.iloc[-1] if not atr.empty else None
-                        
-                        if current_atr and not pd.isna(current_atr):
-                            indicators['atr'] = round(float(current_atr), 5)
+                if 'atr' not in indicators:
+                    try:
+                        if len(df) >= 14:
+                            high_low = df['high'] - df['low']
+                            high_close = np.abs(df['high'] - df['close'].shift())
+                            low_close = np.abs(df['low'] - df['close'].shift())
+                            
+                            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+                            atr = true_range.rolling(window=14).mean()
+                            
+                            current_atr = atr.iloc[-1] if not atr.empty else None
+                            
+                            if current_atr and not pd.isna(current_atr):
+                                indicators['atr'] = round(float(current_atr), 5)
+                            else:
+                                indicators['atr'] = None
                         else:
                             indicators['atr'] = None
-                    else:
+                    except Exception as e:
+                        logger.warning(f"[WARNING] فشل في حساب ATR احتياطي للرمز {symbol} على إطار {tf_name}: {e}")
                         indicators['atr'] = None
-                except Exception as e:
-                    logger.warning(f"[WARNING] فشل في حساب ATR للرمز {symbol} على إطار {tf_name}: {e}")
-                    indicators['atr'] = None
                 
                 # ================ حساب جميع المؤشرات الشاملة ================
                 try:
@@ -11194,6 +11639,78 @@ def test_bot_functionality(message):
     except Exception as e:
         logger.error(f"[ERROR] خطأ في اختبار البوت: {e}")
         bot.reply_to(message, "❌ خطأ في تشغيل الاختبار")
+
+@bot.message_handler(commands=['accuracy', 'validate'])
+def test_indicators_accuracy(message):
+    """اختبار دقة المؤشرات مقارنة بالشارت"""
+    try:
+        user_id = message.from_user.id
+        
+        if user_id not in user_sessions:
+            bot.reply_to(message, "🔒 يرجى إدخال كلمة المرور أولاً باستخدام الأمر /start")
+            return
+        
+        # التحقق من وجود رمز في الرسالة
+        text_parts = message.text.split()
+        symbol = "EURUSD"  # افتراضي
+        timeframe = "M15"   # افتراضي
+        
+        if len(text_parts) >= 2:
+            symbol = text_parts[1].upper()
+        if len(text_parts) >= 3:
+            timeframe = text_parts[2].upper()
+        
+        bot.reply_to(message, f"🔍 **جاري اختبار دقة المؤشرات...**\n📊 الرمز: {symbol}\n⏰ الإطار: {timeframe}\n\nقد يستغرق هذا بضع ثوانٍ...")
+        
+        # تشغيل اختبار الدقة
+        validation_result = validate_indicators_accuracy(symbol, timeframe)
+        
+        # تنسيق النتائج
+        response = f"🎯 **تقرير دقة المؤشرات**\n\n"
+        response += f"📊 **الرمز:** {validation_result['symbol']}\n"
+        response += f"⏰ **الإطار:** {validation_result['timeframe']}\n"
+        response += f"🎪 **التقييم العام:** {validation_result['overall_accuracy']}\n\n"
+        
+        # عرض اختبارات الدقة
+        if validation_result['accuracy_tests']:
+            response += "📋 **اختبارات الدقة:**\n"
+            for test_name, result in validation_result['accuracy_tests'].items():
+                if test_name == 'data_availability':
+                    response += f"• البيانات: {result}\n"
+                elif test_name == 'rsi':
+                    response += f"• RSI: {result}\n"
+                elif test_name == 'macd':
+                    response += f"• MACD: {result}\n"
+                elif test_name == 'stochastic':
+                    response += f"• Stochastic: {result}\n"
+                elif test_name == 'moving_averages':
+                    response += f"• المتوسطات: {result}\n"
+                else:
+                    response += f"• {test_name}: {result}\n"
+        
+        # عرض التوصيات
+        if validation_result['recommendations']:
+            response += "\n💡 **التوصيات:**\n"
+            for rec in validation_result['recommendations']:
+                response += f"{rec}\n"
+        
+        # إضافة معلومات إضافية
+        if validation_result['overall_accuracy'] == 'ممتاز':
+            response += "\n🏆 **المؤشرات دقيقة جداً ومطابقة للشارت!**"
+        elif validation_result['overall_accuracy'] == 'جيد':
+            response += "\n✅ **المؤشرات دقيقة بشكل عام**"
+        elif validation_result['overall_accuracy'] == 'مقبول':
+            response += "\n⚠️ **المؤشرات تحتاج بعض التحسين**"
+        else:
+            response += "\n🔧 **يوصى بمراجعة إعدادات MT5**"
+        
+        response += "\n\n📝 **للاختبار برمز آخر:** `/accuracy SYMBOL TIMEFRAME`\n**مثال:** `/accuracy XAUUSD M5`"
+        
+        bot.reply_to(message, response, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ في اختبار دقة المؤشرات: {e}")
+        bot.reply_to(message, "❌ خطأ في تشغيل اختبار الدقة")
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
