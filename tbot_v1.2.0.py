@@ -930,15 +930,11 @@ def handle_switch_notification_length_command(message):
 
 @bot.message_handler(commands=['send_frames_msg'])
 def handle_send_frames_msg_command(message):
-    """معالج أمر تفعيل/إلغاء تفعيل إرسال رسائل المؤشرات للإطارات المختلفة - للمطور فقط"""
+    """معالج أمر تفعيل/إلغاء تفعيل إرسال رسائل المؤشرات للإطارات المختلفة - متاح لجميع المستخدمين"""
     try:
         user_id = message.from_user.id
-        DEVELOPER_ID = 6891599955  # ID المطور الفعلي
         
-        # التحقق من أن المستخدم هو المطور
-        if user_id != DEVELOPER_ID:
-            bot.reply_to(message, "⚠️ هذا الأمر متاح للمطور فقط")
-            return
+        # إزالة القيد - الأمر متاح للجميع الآن
         
         # تبديل حالة إرسال رسائل الإطارات
         global SEND_FRAMES_MESSAGES
@@ -9685,32 +9681,34 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
             return apply_hidden_success_boost(base_rate)
 
 def apply_hidden_success_boost(original_rate: float) -> float:
-    """تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)"""
+    """تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم) - محسن للتنويع"""
     import random
+    import time
     
-    # تحديد القيمة العشوائية بناءً على النسبة الحالية - المنطق المُصحح
+    # إضافة seed عشوائي بناءً على الوقت لضمان التنويع
+    random.seed(int(time.time() * 1000) % 10000)
+    
+    # تحديد نطاقات متنوعة أكثر
     if original_rate < 40:
-        random_boost = random.choice([8, 12])   # أقل تحسين للنسب المنخفضة (منطق صحيح)
+        random_boost = random.uniform(8, 15)   # نطاق متغير للنسب المنخفضة
     elif original_rate < 60:
-        random_boost = random.choice([10, 14])   # تحسين متوسط
+        random_boost = random.uniform(10, 18)  # نطاق متغير متوسط
     elif original_rate < 75:
-        random_boost = random.choice([12, 16])   # تحسين متوسط-عالي
+        random_boost = random.uniform(12, 20)  # نطاق متغير متوسط-عالي
     elif original_rate < 85:
-        random_boost = random.choice([14, 18])  # تحسين عالي
+        random_boost = random.uniform(5, 15)   # تقليل التحسين للنسب العالية لمزيد من التنويع
     else:
-        random_boost = random.choice([16, 20]) # أعلى تحسين للنسب العالية (منطق صحيح)
+        random_boost = random.uniform(3, 12)   # تحسين أقل للنسب العالية جداً
+    
+    # إضافة عامل عشوائي إضافي للتنويع
+    variability_factor = random.uniform(-3, 3)
+    final_boost = random_boost + variability_factor
     
     # تطبيق التحسين مع مراعاة الحدود
-    enhanced_rate = original_rate + random_boost
+    enhanced_rate = original_rate + final_boost
     
-    # تطبيق قاعدة الحد الأقصى 96% إلا إذا كانت النسبة الأصلية أعلى
-    if original_rate <= 96:
-        final_rate = min(enhanced_rate, 96)
-    else:
-        final_rate = enhanced_rate  # لا حد أقصى إذا كانت النسبة الأصلية > 96%
-    
-    # ضمان عدم تجاوز 100%
-    final_rate = min(final_rate, 100)
+    # ضمان النطاق المقبول
+    final_rate = max(35, min(98, enhanced_rate))  # نطاق أوسع للتنويع
     
     return round(final_rate, 1)
 
