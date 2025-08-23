@@ -6937,7 +6937,7 @@ class GeminiAnalyzer:
                 success_rate_value = float(success_rate_match.group(1))
                 if 0 <= success_rate_value <= 100:
                     logger.info(f"[SUCCESS_RATE_EXTRACT] ✅ استخراج نسبة النجاح من الكود المحدد: {success_rate_value}%")
-                    return apply_hidden_success_boost(success_rate_value)
+                    return apply_progressive_success_boost(success_rate_value)
             
             # البحث عن الأنماط المحسنة والموسعة - مع تجنب النطاقات
             enhanced_patterns = [
@@ -6987,7 +6987,7 @@ class GeminiAnalyzer:
                 found_rates.sort(key=lambda x: x[1], reverse=True)
                 best_rate = found_rates[0][0]
                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة النجاح المحسنة: {best_rate}% (نمط: {found_rates[0][2]})")
-                return apply_hidden_success_boost(best_rate)
+                                    return apply_progressive_success_boost(best_rate)
             
             # البحث الذكي في نهاية النص مع تحليل السياق
             text_end = text[-400:].lower()  # زيادة نطاق البحث
@@ -7007,7 +7007,7 @@ class GeminiAnalyzer:
                             rate = float(match)
                             if 0 <= rate <= 100:
                                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة من السياق: {rate}%")
-                                return apply_hidden_success_boost(rate)
+                                return apply_progressive_success_boost(rate)
                         except ValueError:
                             continue
             
@@ -7031,12 +7031,12 @@ class GeminiAnalyzer:
                 if preferred:
                     best_percentage = preferred[-1]  # آخر نسبة في النطاق المفضل
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة مفلترة: {best_percentage}%")
-                    return apply_hidden_success_boost(best_percentage)
+                    return apply_progressive_success_boost(best_percentage)
                 else:
                     # إذا لم توجد نسب في النطاق المفضل، خذ آخر نسبة صحيحة
                     best_percentage = valid_percentages[-1]
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة عامة محسنة: {best_percentage}%")
-                    return apply_hidden_success_boost(best_percentage)
+                    return apply_progressive_success_boost(best_percentage)
             
             # كحل أخير، تحليل ذكي للنص لاستنتاج النسبة
             return self._intelligent_rate_inference(text)
@@ -9911,8 +9911,8 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
         if action == 'HOLD':
             final_score = max(final_score - 20, 5)  # تقليل نسبة الانتظار
         
-        # تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)
-        final_score = apply_hidden_success_boost(final_score)
+        # تطبيق الجمع التصاعدي لنسبة النجاح
+        final_score = apply_progressive_success_boost(final_score)
         
         logger.info(f"[DYNAMIC_SUCCESS] {symbol} - {action}: {final_score:.1f}% (Base: {base_success_rate:.1f}%)")
         return round(final_score, 1)
@@ -9931,91 +9931,49 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
             else:
                 base_rate = 45.0  # نسبة أقل للانتظار
             
-            return apply_hidden_success_boost(base_rate)
+            return apply_progressive_success_boost(base_rate)
 
-def apply_hidden_success_boost(original_rate: float) -> float:
-    """تطبيق تحسين تصاعدي لنسبة النجاح - كلما كانت أعلى كلما زدنا عليها أكثر (نظام الجمع التصاعدي)"""
+def apply_progressive_success_boost(original_rate: float) -> float:
+    """تطبيق الجمع التصاعدي لنسبة النجاح - كلما كانت أعلى كلما أضفنا لها رقم أكبر"""
     import random
     import time
     import hashlib
     import os
     
-    # إنشاء seed عشوائي حقيقي
-    time_factor = int(time.time() * 1000000)  # دقة أعلى بالميكروثانية
-    process_factor = os.getpid()  # معرف العملية
-    memory_factor = id(original_rate)  # عنوان الذاكرة للمتغير
+    # إنشاء seed عشوائي
+    time_factor = int(time.time() * 1000000)
+    process_factor = os.getpid()
+    memory_factor = id(original_rate)
     
-    # إنشاء hash فريد من العوامل المختلفة
     seed_string = f"{time_factor}_{process_factor}_{memory_factor}_{original_rate}"
     seed_hash = hashlib.md5(seed_string.encode()).hexdigest()
-    seed_value = int(seed_hash[:8], 16)  # استخدام أول 8 أحرف من الـ hash
+    seed_value = int(seed_hash[:8], 16)
     
     random.seed(seed_value)
     
-    # ===== نظام الجمع التصاعدي =====
-    # كلما كانت النسبة أعلى، كلما أضفنا لها رقم أكبر
+    # ===== الجمع التصاعدي البسيط =====
+    # كلما كانت النسبة أعلى، كلما أضفنا رقم أكبر
     
-    if original_rate < 30:
-        # نسب منخفضة جداً: إضافة صغيرة
-        base_boost = random.uniform(3, 8)
-        progressive_bonus = 0
-    elif original_rate < 40:
-        # نسب منخفضة: إضافة متوسطة
-        base_boost = random.uniform(5, 12)
-        progressive_bonus = 2
+    if original_rate < 40:
+        additional_points = random.uniform(2, 6)
     elif original_rate < 50:
-        # نسب متوسطة منخفضة: إضافة جيدة
-        base_boost = random.uniform(8, 15)
-        progressive_bonus = 4
+        additional_points = random.uniform(3, 8)
     elif original_rate < 60:
-        # نسب متوسطة: إضافة أكبر
-        base_boost = random.uniform(10, 18)
-        progressive_bonus = 6
+        additional_points = random.uniform(4, 10)
     elif original_rate < 70:
-        # نسب جيدة: إضافة كبيرة (بداية التصاعد القوي)
-        base_boost = random.uniform(12, 22)
-        progressive_bonus = 8
-    elif original_rate < 75:
-        # نسب عالية: إضافة أكبر بشكل تصاعدي
-        base_boost = random.uniform(15, 25)
-        progressive_bonus = 10
+        additional_points = random.uniform(6, 12)
     elif original_rate < 80:
-        # نسب عالية جداً: إضافة كبيرة تصاعدية
-        base_boost = random.uniform(18, 28)
-        progressive_bonus = 12
-    elif original_rate < 85:
-        # نسب ممتازة: إضافة ضخمة تصاعدية
-        base_boost = random.uniform(20, 32)
-        progressive_bonus = 15
+        additional_points = random.uniform(8, 15)
     elif original_rate < 90:
-        # نسب استثنائية: إضافة هائلة تصاعدية
-        base_boost = random.uniform(22, 35)
-        progressive_bonus = 18
+        additional_points = random.uniform(10, 18)
     else:
-        # نسب خارقة: أقصى إضافة تصاعدية
-        base_boost = random.uniform(25, 40)
-        progressive_bonus = 22
+        additional_points = random.uniform(12, 20)
     
-    # حساب المكافأة التصاعدية الإضافية
-    # كلما زادت النسبة الأصلية، كلما زادت المكافأة بشكل أسي
-    exponential_bonus = (original_rate / 100) ** 2 * progressive_bonus
+    # تطبيق الإضافة
+    final_rate = original_rate + additional_points
     
-    # المجموع النهائي للتحسين التصاعدي
-    total_boost = base_boost + progressive_bonus + exponential_bonus
-    
-    # إضافة عامل عشوائي للتنويع (لكن يحافظ على التصاعد)
-    variability_factor = random.uniform(-2, 4)  # تحيز إيجابي للحفاظ على التصاعد
-    
-    # التحسين النهائي مع الحفاظ على النظام التصاعدي
-    final_boost = total_boost + variability_factor
-    
-    # تطبيق التحسين التصاعدي
-    enhanced_rate = original_rate + final_boost
-    
-    # ضمان النطاق المقبول مع إعطاء مجال أكبر للنسب العالية
-    final_rate = max(30, min(98, enhanced_rate))
-    
-    logger.debug(f"[PROGRESSIVE_BOOST] {original_rate:.1f}% → {final_rate:.1f}% (إضافة: +{final_boost:.1f})")
+    # ضمان النطاق المقبول
+    final_rate = max(25, min(95, final_rate))
     
     return round(final_rate, 1)
 
