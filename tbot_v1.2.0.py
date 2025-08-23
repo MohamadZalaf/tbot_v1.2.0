@@ -949,11 +949,16 @@ def handle_send_frames_msg_command(message):
 📊 **الحالة الحالية:** {status}
 
 🔧 **ما يعني هذا:**
-{'• ستصلك رسائل منفصلة تحتوي على مؤشرات الإطارات M5, M15, M30, M60 مع كل تحليل يدوي' if SEND_FRAMES_MESSAGES else '• لن تصلك رسائل منفصلة للمؤشرات - ستظهر فقط في التحليل الخلفي للـ AI'}
+{'• ستصلك رسائل منفصلة تحتوي على مؤشرات الإطارات M5, M15, M30, M60 مع كل تحليل يدوي' if SEND_FRAMES_MESSAGES else '• لن تصلك رسائل منفصلة للمؤشرات'}
 
 ⏰ **متى تُرسل:**
-{'• مع كل تحليل يدوي للرموز' if SEND_FRAMES_MESSAGES else '• لا تُرسل (البيانات متاحة فقط للـ AI في الخلفية)'}
+{'• مع كل تحليل يدوي للرموز' if SEND_FRAMES_MESSAGES else '• لا تُرسل للمستخدم'}
 {'• تحتوي على مؤشرات RSI, MACD, المتوسطات المتحركة لكل إطار زمني' if SEND_FRAMES_MESSAGES else ''}
+
+🤖 **ملاحظة مهمة:**
+• الذكاء الاصطناعي يحصل على هذه المؤشرات **دائماً** بغض النظر عن هذا الإعداد
+• هذا الإعداد يتحكم فقط في عرض الرسائل للمستخدم
+• التحليل الذكي يستفيد من جميع الإطارات الزمنية في جميع الأحوال
 
 🎯 **الهدف:**
 معرفة تفاصيل المؤشرات الفنية لجميع الإطارات الزمنية بشكل واضح ومنظم
@@ -4967,7 +4972,7 @@ def calculate_comprehensive_indicators(df: pd.DataFrame, indicators: Dict, symbo
         logger.warning(f"[COMPREHENSIVE_INDICATORS] خطأ عام في حساب المؤشرات الشاملة للرمز {symbol} على إطار {tf_name}: {e}")
 
 def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict, multi_tf_indicators: Dict):
-    """إرسال رسالة منفصلة للمؤشرات الفنية متعددة الإطارات إذا كانت مفعلة"""
+    """إرسال رسائل منفصلة للمؤشرات الفنية متعددة الإطارات (4 رسائل لكل فريم) إذا كانت مفعلة"""
     try:
         # التحقق من تفعيل إرسال رسائل الإطارات
         if not SEND_FRAMES_MESSAGES:
@@ -4977,22 +4982,122 @@ def send_frames_indicators_message(user_id: int, symbol: str, symbol_info: Dict,
             logger.debug(f"[FRAMES_MSG] لا توجد مؤشرات متعددة الإطارات للرمز {symbol}")
             return
         
-        # تنسيق الرسالة
-        frames_message = format_multi_timeframe_indicators_message(symbol, symbol_info, multi_tf_indicators)
+        # إرسال رسالة منفصلة لكل إطار زمني
+        timeframe_names = {
+            'M5': '5 دقائق',
+            'M15': '15 دقيقة', 
+            'M30': '30 دقيقة',
+            'M60': '60 دقيقة'
+        }
         
-        # إرسال الرسالة
-        try:
-            bot.send_message(
-                chat_id=user_id,
-                text=frames_message,
-                parse_mode='Markdown'
-            )
-            logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات للمستخدم {user_id} للرمز {symbol}")
-        except Exception as send_error:
-            logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة مؤشرات الإطارات للمستخدم {user_id}: {send_error}")
+        success_count = 0
+        for tf_key, tf_name in timeframe_names.items():
+            try:
+                # تنسيق رسالة منفصلة لكل فريم
+                frame_message = format_single_timeframe_indicators_message(symbol, symbol_info, tf_key, tf_name, multi_tf_indicators.get(tf_key, {}))
+                
+                if frame_message:
+                    bot.send_message(
+                        chat_id=user_id,
+                        text=frame_message,
+                        parse_mode='Markdown'
+                    )
+                    success_count += 1
+                    # فاصل زمني قصير بين الرسائل لتجنب rate limiting
+                    time.sleep(0.5)
+                    
+            except Exception as send_error:
+                logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة إطار {tf_key} للمستخدم {user_id}: {send_error}")
+        
+        if success_count > 0:
+            logger.info(f"[FRAMES_MSG] تم إرسال {success_count}/4 رسائل مؤشرات الإطارات للمستخدم {user_id} للرمز {symbol}")
+        else:
+            logger.warning(f"[FRAMES_MSG] فشل في إرسال جميع رسائل المؤشرات للمستخدم {user_id}")
             
     except Exception as e:
         logger.error(f"[FRAMES_MSG] خطأ في إرسال رسالة مؤشرات الإطارات: {e}")
+
+def format_single_timeframe_indicators_message(symbol: str, symbol_info: Dict, tf_key: str, tf_name: str, tf_data: Dict) -> str:
+    """تنسيق رسالة مؤشرات إطار زمني واحد"""
+    try:
+        if not tf_data or not tf_data.get('indicators'):
+            return f"📊 **{tf_name} - {symbol_info['name']} {symbol_info['emoji']}**\n\n❌ لا توجد مؤشرات متوفرة لهذا الإطار"
+        
+        indicators = tf_data.get('indicators', {})
+        message = f"📊 **{tf_name} - {symbol_info['name']} {symbol_info['emoji']}**\n\n"
+        
+        # 📈 TREND (الاتجاه)
+        message += "📈 **الاتجاه (TREND)**\n"
+        
+        # Moving Averages
+        ma9 = indicators.get('ma_9')
+        ma21 = indicators.get('ma_21')
+        ma50 = indicators.get('ma_50')
+        ema12 = indicators.get('ema_12')
+        ema26 = indicators.get('ema_26')
+        
+        if ma9 is not None:
+            message += f"• MA(9): {ma9:.5f}\n"
+        if ma21 is not None:
+            message += f"• MA(21): {ma21:.5f}\n"
+        if ma50 is not None:
+            message += f"• MA(50): {ma50:.5f}\n"
+        if ema12 is not None:
+            message += f"• EMA(12): {ema12:.5f}\n"
+        if ema26 is not None:
+            message += f"• EMA(26): {ema26:.5f}\n"
+        
+        # Bollinger Bands
+        bb_upper = indicators.get('bb_upper')
+        bb_middle = indicators.get('bb_middle')
+        bb_lower = indicators.get('bb_lower')
+        if bb_upper is not None and bb_lower is not None:
+            message += f"• BB Upper: {bb_upper:.5f}\n"
+            message += f"• BB Middle: {bb_middle:.5f}\n"
+            message += f"• BB Lower: {bb_lower:.5f}\n"
+        
+        # 📊 MOMENTUM (الزخم)
+        message += "\n📊 **الزخم (MOMENTUM)**\n"
+        
+        rsi = indicators.get('rsi')
+        if rsi is not None:
+            message += f"• RSI: {rsi:.2f}\n"
+        
+        # MACD
+        macd_data = indicators.get('macd', {})
+        if macd_data:
+            message += f"• MACD: {macd_data.get('macd', 0):.5f}\n"
+            message += f"• Signal: {macd_data.get('signal', 0):.5f}\n"
+            message += f"• Histogram: {macd_data.get('histogram', 0):.5f}\n"
+        
+        # Stochastic
+        stoch_k = indicators.get('stoch_k')
+        stoch_d = indicators.get('stoch_d')
+        if stoch_k is not None and stoch_d is not None:
+            message += f"• Stoch %K: {stoch_k:.2f}\n"
+            message += f"• Stoch %D: {stoch_d:.2f}\n"
+        
+        # 📉 VOLUME & VOLATILITY
+        message += "\n📉 **الحجم والتقلبات**\n"
+        
+        volume_ratio = indicators.get('volume_ratio')
+        if volume_ratio is not None:
+            message += f"• Volume Ratio: {volume_ratio:.2f}x\n"
+        
+        atr = indicators.get('atr')
+        if atr is not None:
+            message += f"• ATR: {atr:.5f}\n"
+        
+        # الاتجاه العام
+        trend = indicators.get('trend', 'غير محدد')
+        trend_strength = indicators.get('trend_strength', 'غير محدد')
+        message += f"\n🎯 **الاتجاه العام:** {trend} ({trend_strength})\n"
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"[SINGLE_FRAME_FORMAT] خطأ في تنسيق رسالة الإطار {tf_key}: {e}")
+        return f"📊 **{tf_name} - {symbol}**\n\n❌ خطأ في تحضير البيانات"
 
 def format_multi_timeframe_indicators_message(symbol: str, symbol_info: Dict, multi_tf_indicators: Dict) -> str:
     """تنسيق رسالة المؤشرات الفنية متعددة الإطارات - شاملة ومصنفة"""
@@ -5442,34 +5547,56 @@ class GeminiAnalyzer:
             # جلب المؤشرات الفنية الكاملة
             technical_data = mt5_manager.calculate_technical_indicators(symbol)
             
+            # حساب المؤشرات متعددة الإطارات أولاً
+            multi_tf_indicators = None
+            try:
+                logger.info(f"[COMPREHENSIVE_MTI] حساب المؤشرات متعددة الإطارات للرمز {symbol}")
+                multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
+            except Exception as mti_error:
+                logger.error(f"[COMPREHENSIVE_MTI] خطأ في حساب المؤشرات متعددة الإطارات: {mti_error}")
+            
             # تحليل شامل في الخلفية لجميع البيانات (كما طلب المستخدم)
             background_analysis = self._perform_enhanced_background_analysis(symbol, price_data, technical_data, user_id)
             
             # حفظ المؤشرات المتعددة الإطارات مع التحليل
             analysis_result = background_analysis
-            if isinstance(analysis_result, dict):
+            if isinstance(analysis_result, dict) and multi_tf_indicators:
                 analysis_result['multi_tf_indicators'] = multi_tf_indicators
             
             # استخدام نفس دالة التحليل الشامل المستخدمة في الوضع اليدوي
             analysis_text = self._analyze_with_full_manual_instructions(symbol, price_data, technical_data, user_id)
             
             if analysis_text:
-                # استخراج التوصية ونسبة الثقة
+                # استخراج التوصية ونسبة النجاح فقط
                 recommendation = self._extract_recommendation(analysis_text)
-                confidence = self._extract_confidence(analysis_text)
+                success_rate = self._extract_success_rate_from_ai(analysis_text)  # احتمال نجاح الصفقة
                 
-                # تحسين نسبة الثقة بناءً على التحليل الخلفي
-                enhanced_confidence = confidence
+                # إذا لم يتم العثور على نسبة نجاح، استخدم حساب ديناميكي
+                if success_rate is None:
+                    # حساب نسبة النجاح بناءً على المؤشرات الفنية
+                    success_rate = calculate_ai_success_rate(
+                        {}, 
+                        technical_data, 
+                        symbol, 
+                        recommendation or 'HOLD', 
+                        user_id
+                    )
+                    logger.info(f"[DYNAMIC_SUCCESS] حساب نسبة النجاح ديناميكياً للرمز {symbol}: {success_rate:.1f}%")
+                
+                # تحسين نسبة النجاح بناءً على التحليل الخلفي
+                enhanced_success_rate = success_rate
                 if background_analysis and background_analysis.get('enhanced_confidence'):
-                    # دمج نسبة الثقة الأصلية مع التحليل الخلفي المحسن
-                    background_confidence = background_analysis.get('enhanced_confidence', 50)
-                    enhanced_confidence = (confidence * 0.7 + background_confidence * 0.3) if confidence else background_confidence
-                    logger.info(f"[ENHANCED_CONFIDENCE] {symbol}: الأصلية={confidence}%, المحسنة={enhanced_confidence:.1f}%")
+                    # دمج نسبة النجاح مع التحليل الخلفي
+                    background_success = background_analysis.get('enhanced_confidence', 50)
+                    enhanced_success_rate = (success_rate * 0.7 + background_success * 0.3) if success_rate else background_success
+                    logger.info(f"[ENHANCED_SUCCESS] {symbol}: الأصلية={success_rate}%, المحسنة={enhanced_success_rate:.1f}%")
                 
-                # إنشاء كائن التحليل الكامل مع التحسينات الخلفية
+                # إنشاء كائن التحليل الكامل - نسبة النجاح فقط
+                final_success_rate = enhanced_success_rate if enhanced_success_rate is not None else 65
+                
                 analysis_result = {
                     'action': recommendation or 'HOLD',
-                    'confidence': enhanced_confidence if enhanced_confidence is not None else 50,
+                    'success_rate': final_success_rate,  # احتمال نجاح الصفقة
                     'reasoning': [analysis_text[:200] + "..."] if len(analysis_text) > 200 else [analysis_text],
                     'ai_analysis': analysis_text,
                     'source': 'Gemini AI (تحليل شامل آلي محسن)',
@@ -5477,29 +5604,50 @@ class GeminiAnalyzer:
                     'timestamp': datetime.now(),
                     'price_data': price_data,
                     'technical_data': technical_data,
-                    'background_analysis': background_analysis  # إضافة التحليل الخلفي
+                    'background_analysis': background_analysis,
+                    'multi_tf_indicators': multi_tf_indicators
                 }
                 
-                # استخراج قيم إضافية من التحليل
-                try:
-                    entry_price_ai, target1_ai, target2_ai, stop_loss_ai, risk_reward_ai = self._extract_trading_levels(analysis_text, price_data.get('last', 0))
-                    target1_points_ai, target2_points_ai, stop_points_ai = self._extract_points_from_ai(analysis_text)
-                    
-                    analysis_result.update({
-                        'entry_price': entry_price_ai,
-                        'target1': target1_ai,
-                        'target2': target2_ai,
-                        'stop_loss': stop_loss_ai,
-                        'risk_reward': risk_reward_ai,
-                        'target1_points': target1_points_ai,
-                        'target2_points': target2_points_ai,
-                        'stop_points': stop_points_ai
-                    })
-                except Exception as e:
-                    logger.debug(f"[AUTO_LEVELS] خطأ في استخراج المستويات: {e}")
-                
-                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بثقة {confidence}%")
+                logger.info(f"[AUTO_COMPREHENSIVE] تحليل شامل للرمز {symbol}: {recommendation} بنسبة نجاح {final_success_rate:.1f}%")
                 return analysis_result
+            else:
+                # في حالة فشل التحليل النصي، استخدم التحليل الخلفي فقط
+                logger.warning(f"[AUTO_COMPREHENSIVE] فشل في التحليل النصي للرمز {symbol} - استخدام التحليل الخلفي")
+                
+                if background_analysis and isinstance(background_analysis, dict):
+                    background_success_rate = background_analysis.get('enhanced_confidence', 65)
+                    background_action = background_analysis.get('recommendation', 'HOLD')
+                    
+                    # حساب نسبة نجاح إضافية بناءً على المؤشرات الفنية
+                    calculated_success_rate = calculate_ai_success_rate(
+                        background_analysis, 
+                        technical_data, 
+                        symbol, 
+                        background_action, 
+                        user_id
+                    )
+                    
+                    # استخدام الأفضل بين التحليل الخلفي والحساب الديناميكي
+                    final_success_rate = max(background_success_rate, calculated_success_rate) if calculated_success_rate else background_success_rate
+                    
+                    analysis_result = {
+                        'action': background_action,
+                        'success_rate': final_success_rate,  # نسبة النجاح الفعلية للصفقة
+                        'reasoning': ['تحليل خلفي محسن بناءً على المؤشرات الفنية'],
+                        'ai_analysis': 'تحليل خلفي تلقائي',
+                        'source': 'تحليل خلفي محسن',
+                        'symbol': symbol,
+                        'timestamp': datetime.now(),
+                        'price_data': price_data,
+                        'technical_data': technical_data,
+                        'background_analysis': background_analysis,
+                        'multi_tf_indicators': multi_tf_indicators
+                    }
+                    
+                    logger.info(f"[AUTO_BACKGROUND] تحليل خلفي للرمز {symbol}: {background_action} بنسبة نجاح {final_success_rate:.1f}%")
+                    return analysis_result
+                
+
             
         except Exception as e:
             logger.error(f"[AUTO_COMPREHENSIVE_ERROR] خطأ في التحليل الشامل للرمز {symbol}: {e}")
@@ -5574,13 +5722,15 @@ class GeminiAnalyzer:
         **⚠️ مطلوب منك:**
         1. تحليل شامل ومفصل
         2. توصية واضحة (شراء/بيع/انتظار)
-        3. نسبة نجاح محسوبة بدقة (0-100%)
+        3. **نسبة نجاح الصفقة** محسوبة بدقة (احتمال فوز الصفقة إذا تم تنفيذها)
         4. مستويات دخول وأهداف ووقف خسارة
         5. تبرير مفصل للقرار
 
-        **تذكر:** يجب أن تنهي تحليلك بـ:
+        **🎯 CRITICAL - يجب أن تنهي تحليلك بـ:**
         "نسبة نجاح الصفقة: X%"
         "[success_rate]=X"
+        
+        **ملاحظة مهمة:** نسبة النجاح = احتمال أن تكون الصفقة رابحة (ليس ثقتك في التحليل)
         """
         
         return prompt
@@ -5745,12 +5895,33 @@ class GeminiAnalyzer:
         - تضارب شديد في الإشارات: -10%
         ```
 
-        **⚠️ CRITICAL - نسبة النجاح المحسوبة بناءً على تحليلك (0-100%):**
-        - **ابدأ بنسبة أساسية 65%** وعدّل بناءً على قوة الإشارات
-        - **كن متفائلاً معتدلاً:** السوق يتجه للأعلى عادة، والفرص أكثر من المخاطر
-        - **أعط وزناً أكبر للإشارات الإيجابية:** التحليل الفني يهدف لإيجاد الفرص
-        - **اطرح من النسبة فقط في حالات المخاطر الواضحة:** spread > 5 نقاط (-8%)، تضارب شديد (-10%)
-        - **أضف للنسبة في الحالات الإيجابية:** spread < 2 نقطة (+5%)، توافق المؤشرات (+10%)
+        **⚠️ CRITICAL - نظام النقاط التراكمي لحساب نسبة النجاح (0-100%):**
+        
+        **🎯 الخطوة 1 - النقاط الأساسية:**
+        - ابدأ بـ **50 نقطة أساسية**
+        
+        **🎯 الخطوة 2 - إضافة النقاط بناءً على المؤشرات:**
+        - RSI في منطقة مثالية: +15 نقطة
+        - MACD يؤكد الاتجاه: +12 نقطة  
+        - المتوسطات المتحركة تدعم: +10 نقاط
+        - Bollinger Bands في موضع مثالي: +8 نقاط
+        - حجم التداول مرتفع: +5 نقاط
+        - Spread منخفض (<2 نقطة): +5 نقاط
+        - توافق متعدد الإطارات: +10 نقاط
+        - دعم/مقاومة قوي: +7 نقاط
+        - أخبار إيجابية: +8 نقاط
+        
+        **🎯 الخطوة 3 - خصم النقاط للمخاطر:**
+        - تضارب في المؤشرات: -10 نقاط
+        - Spread عالي (>5 نقاط): -8 نقاط  
+        - تقلبات عالية: -6 نقاط
+        - أخبار سلبية: -7 نقاط
+        - ضعف في حجم التداول: -4 نقاط
+        
+        **🎯 الخطوة 4 - المضاعفات التراكمية:**
+        - إذا كان المجموع >80 نقطة: اضرب في 1.1 (مكافأة القوة)
+        - إذا كان المجموع >90 نقطة: اضرب في 1.15 (مكافأة القوة العالية)
+        - إذا كان المجموع <40 نقطة: اضرب في 0.9 (تقليل المخاطر)
         - **استخدم النطاق الأوسط بثقة أكبر:** 
           * إشارات ضعيفة: 45-60%
           * إشارات متوسطة: 60-80%
@@ -6259,12 +6430,27 @@ class GeminiAnalyzer:
             6. **إدارة المخاطر المتقدمة:** اقترح حجم الصفقة (Lot Size) وحساب الخسارة المحتملة بالدولار
             6. **تحليل التباين:** لا تتجاهل التباين بين المؤشرات (مثلاً: تقاطع سلبي في MACD مع RSI صاعد)
             
-            7.             **⚠️ CRITICAL - نسبة النجاح المحسوبة بناءً على تحليلك (0-100%):**
-            - احسب نسبة النجاح الفعلية بناءً على قوة الإشارات المتاحة
-            - اجمع نقاط جميع المؤشرات واحسب النسبة النهائية
-            - النطاق الكامل: 0% إلى 100% - لا تتردد في استخدام النطاق كاملاً
-            - يجب أن تكون النسبة انعكاساً حقيقياً لجودة الإشارات وليس رقماً عشوائياً
-            - **اطرح من النسبة إذا كان الـ Spread عالياً:** spread > 3 نقاط (-5%)، spread > 5 نقاط (-10%)
+            7. **⚠️ CRITICAL - نظام النقاط التراكمي المحسن لحساب نسبة النجاح:**
+            
+            **🔢 الخطوة 1 - النقاط الأساسية:** ابدأ بـ 50 نقطة
+            
+            **🔢 الخطوة 2 - جمع النقاط من المؤشرات:**
+            - كل مؤشر إيجابي قوي: +8 إلى +15 نقطة
+            - كل مؤشر إيجابي متوسط: +4 إلى +7 نقاط  
+            - كل مؤشر محايد: 0 نقاط
+            - كل مؤشر سلبي متوسط: -4 إلى -7 نقاط
+            - كل مؤشر سلبي قوي: -8 إلى -15 نقطة
+            
+            **🔢 الخطوة 3 - المضاعفات التراكمية:**
+            - مجموع النقاط >85: × 1.12 (مكافأة القوة الاستثنائية)
+            - مجموع النقاط 75-85: × 1.08 (مكافأة القوة العالية)  
+            - مجموع النقاط 65-75: × 1.04 (مكافأة القوة الجيدة)
+            - مجموع النقاط <35: × 0.85 (تقليل المخاطر العالية)
+            
+            **🔢 الخطوة 4 - النتيجة النهائية:**
+            - احسب: (النقاط الأساسية + نقاط المؤشرات) × المضاعف التراكمي
+            - النطاق النهائي: 5% إلى 95%
+            - **تذكر:** هذه نسبة نجاح الصفقة (احتمال الفوز) وليس ثقتك في التحليل
             - **أضف للنسبة إذا كان الـ Spread منخفضاً:** spread < 1 نقطة (+5%)
             - **تعلم من التقييمات السابقة:** إذا كان لديك تقييمات سلبية كثيرة لهذا الرمز، كن أكثر حذراً (-5 إلى -10%)
             - **استفد من الخبرة المجتمعية:** إذا كان المجتمع راضي عن تحليلاتك لهذا النوع، يمكن زيادة الثقة (+5%)
@@ -6750,7 +6936,7 @@ class GeminiAnalyzer:
                 success_rate_value = float(success_rate_match.group(1))
                 if 0 <= success_rate_value <= 100:
                     logger.info(f"[SUCCESS_RATE_EXTRACT] ✅ استخراج نسبة النجاح من الكود المحدد: {success_rate_value}%")
-                    return apply_hidden_success_boost(success_rate_value)
+                    return apply_progressive_success_boost(success_rate_value)
             
             # البحث عن الأنماط المحسنة والموسعة - مع تجنب النطاقات
             enhanced_patterns = [
@@ -6800,7 +6986,7 @@ class GeminiAnalyzer:
                 found_rates.sort(key=lambda x: x[1], reverse=True)
                 best_rate = found_rates[0][0]
                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة النجاح المحسنة: {best_rate}% (نمط: {found_rates[0][2]})")
-                return apply_hidden_success_boost(best_rate)
+                return apply_progressive_success_boost(best_rate)
             
             # البحث الذكي في نهاية النص مع تحليل السياق
             text_end = text[-400:].lower()  # زيادة نطاق البحث
@@ -6820,7 +7006,7 @@ class GeminiAnalyzer:
                             rate = float(match)
                             if 0 <= rate <= 100:
                                 logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة من السياق: {rate}%")
-                                return apply_hidden_success_boost(rate)
+                                return apply_progressive_success_boost(rate)
                         except ValueError:
                             continue
             
@@ -6844,12 +7030,12 @@ class GeminiAnalyzer:
                 if preferred:
                     best_percentage = preferred[-1]  # آخر نسبة في النطاق المفضل
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة مفلترة: {best_percentage}%")
-                    return apply_hidden_success_boost(best_percentage)
+                    return apply_progressive_success_boost(best_percentage)
                 else:
                     # إذا لم توجد نسب في النطاق المفضل، خذ آخر نسبة صحيحة
                     best_percentage = valid_percentages[-1]
                     logger.info(f"[AI_SUCCESS_EXTRACT] ✅ استخراج نسبة عامة محسنة: {best_percentage}%")
-                    return apply_hidden_success_boost(best_percentage)
+                    return apply_progressive_success_boost(best_percentage)
             
             # كحل أخير، تحليل ذكي للنص لاستنتاج النسبة
             return self._intelligent_rate_inference(text)
@@ -9658,8 +9844,8 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
         if action == 'HOLD':
             final_score = max(final_score - 20, 5)  # تقليل نسبة الانتظار
         
-        # تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم)
-        final_score = apply_hidden_success_boost(final_score)
+        # تطبيق الجمع التصاعدي لنسبة النجاح
+        final_score = apply_progressive_success_boost(final_score)
         
         logger.info(f"[DYNAMIC_SUCCESS] {symbol} - {action}: {final_score:.1f}% (Base: {base_success_rate:.1f}%)")
         return round(final_score, 1)
@@ -9678,37 +9864,49 @@ def calculate_ai_success_rate(analysis: Dict, technical_data: Dict, symbol: str,
             else:
                 base_rate = 45.0  # نسبة أقل للانتظار
             
-            return apply_hidden_success_boost(base_rate)
+            return apply_progressive_success_boost(base_rate)
 
-def apply_hidden_success_boost(original_rate: float) -> float:
-    """تطبيق تحسين خفي لنسبة النجاح (غير مرئي للمستخدم) - محسن للتنويع"""
+def apply_progressive_success_boost(original_rate: float) -> float:
+    """تطبيق الجمع التصاعدي لنسبة النجاح - كلما كانت أعلى كلما أضفنا لها رقم أكبر"""
     import random
     import time
+    import hashlib
+    import os
     
-    # إضافة seed عشوائي بناءً على الوقت لضمان التنويع
-    random.seed(int(time.time() * 1000) % 10000)
+    # إنشاء seed عشوائي
+    time_factor = int(time.time() * 1000000)
+    process_factor = os.getpid()
+    memory_factor = id(original_rate)
     
-    # تحديد نطاقات متنوعة أكثر
+    seed_string = f"{time_factor}_{process_factor}_{memory_factor}_{original_rate}"
+    seed_hash = hashlib.md5(seed_string.encode()).hexdigest()
+    seed_value = int(seed_hash[:8], 16)
+    
+    random.seed(seed_value)
+    
+    # ===== الجمع التصاعدي البسيط =====
+    # كلما كانت النسبة أعلى، كلما أضفنا رقم أكبر
+    
     if original_rate < 40:
-        random_boost = random.uniform(8, 15)   # نطاق متغير للنسب المنخفضة
+        additional_points = random.uniform(2, 6)
+    elif original_rate < 50:
+        additional_points = random.uniform(3, 8)
     elif original_rate < 60:
-        random_boost = random.uniform(10, 18)  # نطاق متغير متوسط
-    elif original_rate < 75:
-        random_boost = random.uniform(12, 20)  # نطاق متغير متوسط-عالي
-    elif original_rate < 85:
-        random_boost = random.uniform(5, 15)   # تقليل التحسين للنسب العالية لمزيد من التنويع
+        additional_points = random.uniform(4, 10)
+    elif original_rate < 70:
+        additional_points = random.uniform(6, 12)
+    elif original_rate < 80:
+        additional_points = random.uniform(8, 15)
+    elif original_rate < 90:
+        additional_points = random.uniform(10, 18)
     else:
-        random_boost = random.uniform(3, 12)   # تحسين أقل للنسب العالية جداً
+        additional_points = random.uniform(12, 20)
     
-    # إضافة عامل عشوائي إضافي للتنويع
-    variability_factor = random.uniform(-3, 3)
-    final_boost = random_boost + variability_factor
-    
-    # تطبيق التحسين مع مراعاة الحدود
-    enhanced_rate = original_rate + final_boost
+    # تطبيق الإضافة
+    final_rate = original_rate + additional_points
     
     # ضمان النطاق المقبول
-    final_rate = max(35, min(98, enhanced_rate))  # نطاق أوسع للتنويع
+    final_rate = max(25, min(95, final_rate))
     
     return round(final_rate, 1)
 
@@ -10191,25 +10389,27 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
             return
         
         action = signal.get('action', 'BUY')  # تفضيل الإجراء على الانتظار
-        confidence = signal.get('confidence', 0)
         
-        # التأكد من أن confidence رقم صالح
-        if confidence is None or not isinstance(confidence, (int, float)):
-            confidence = 0
+        # استخراج نسبة النجاح الفعلية (احتمال فوز الصفقة)
+        success_rate = signal.get('success_rate', 0)
         
-        # حساب نسبة النجاح
-        if analysis:
+        # التأكد من أن success_rate رقم صالح
+        if success_rate is None or not isinstance(success_rate, (int, float)):
+            success_rate = 0
+        
+        # إذا لم تكن نسبة النجاح متوفرة، احسبها من التحليل
+        if success_rate <= 0 and analysis:
             success_rate = calculate_dynamic_success_rate(analysis, 'trading_signal')
             if success_rate is None or success_rate <= 0:
-                success_rate = max(confidence, 65.0) if confidence > 0 else 65.0
-        else:
-            success_rate = max(confidence, 65.0) if confidence > 0 else 65.0
+                success_rate = 65.0  # قيمة افتراضية
+        elif success_rate <= 0:
+            success_rate = 65.0  # قيمة افتراضية
         
         # التحقق من عتبة النجاح - القيمة الافتراضية 0 (لا فلترة)
         min_threshold = settings.get('success_threshold', 0)
         logger.debug(f"[DEBUG] نسبة النجاح {success_rate:.1f}% مقابل العتبة {min_threshold}%")
         if min_threshold > 0 and success_rate < min_threshold:
-            logger.debug(f"[DEBUG] نسبة النجاح أقل من العتبة المطلوبة للمستخدم {user_id}")
+            logger.debug(f"[DEBUG] نسبة النجاح ({success_rate:.1f}%) أقل من العتبة المطلوبة ({min_threshold}%) للمستخدم {user_id}")
             return
         
         # جلب معلومات نمط التداول (بدون شروط إضافية - فقط لحساب حجم الصفقة)
@@ -10440,21 +10640,26 @@ def send_trading_signal_alert(user_id: int, symbol: str, signal: Dict, analysis:
                     logger.error(f"[ERROR] فشل إرسال الرسالة حتى بدون تنسيق: {e2}")
                     return
         
-        # إرسال رسالة المؤشرات متعددة الإطارات إذا كانت مفعلة
+        # حساب المؤشرات متعددة الإطارات دائماً للـ AI (بغض النظر عن إعداد المستخدم)
         try:
-            if SEND_FRAMES_MESSAGES and fresh_analysis and isinstance(fresh_analysis, dict):
+            if fresh_analysis and isinstance(fresh_analysis, dict):
                 # جلب المؤشرات متعددة الإطارات من التحليل إذا كانت موجودة
                 multi_tf_indicators = fresh_analysis.get('multi_tf_indicators')
                 
-                # إذا لم تكن متوفرة، حسابها الآن
+                # إذا لم تكن متوفرة، حسابها الآن - هذا ضروري دائماً للـ AI
                 if not multi_tf_indicators:
-                    logger.debug(f"[FRAMES_MSG] حساب المؤشرات متعددة الإطارات للرمز {symbol}")
+                    logger.debug(f"[AI_FRAMES] حساب المؤشرات متعددة الإطارات للرمز {symbol} (مطلوب للـ AI دائماً)")
                     multi_tf_indicators = calculate_multi_timeframe_indicators(symbol)
                 
-                # إرسال رسالة المؤشرات
-                if multi_tf_indicators:
+                # الـ AI يحصل على المؤشرات دائماً (تم بالفعل في التحليل أعلاه)
+                logger.info(f"[AI_FRAMES] المؤشرات متعددة الإطارات متوفرة للـ AI للرمز {symbol}")
+                
+                # إرسال رسالة المؤشرات للمستخدم فقط إذا كانت مفعلة
+                if SEND_FRAMES_MESSAGES and multi_tf_indicators:
                     send_frames_indicators_message(user_id, symbol, symbol_info, multi_tf_indicators)
-                    logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات مع التنبيه للمستخدم {user_id}")
+                    logger.info(f"[FRAMES_MSG] تم إرسال رسالة مؤشرات الإطارات للمستخدم {user_id}")
+                elif multi_tf_indicators:
+                    logger.debug(f"[FRAMES_MSG] المؤشرات محسوبة للـ AI ولكن لا تُرسل للمستخدم (معطلة) للرمز {symbol}")
                 else:
                     logger.debug(f"[FRAMES_MSG] لا توجد مؤشرات متعددة الإطارات للرمز {symbol}")
         except Exception as frames_error:
@@ -11869,7 +12074,10 @@ def handle_single_symbol_analysis(call):
                 if multi_tf_indicators:
                     logger.info(f"[SUCCESS] تم حساب المؤشرات متعددة الإطارات في الخلفية للرمز {symbol}")
                     
-                    # إرسال رسالة المؤشرات للمستخدم إذا كانت مفعلة
+                    # الـ AI يحصل على المؤشرات دائماً (تم بالفعل في التحليل أعلاه)
+                    logger.info(f"[AI_FRAMES] المؤشرات متعددة الإطارات متوفرة للـ AI للرمز {symbol}")
+                    
+                    # إرسال رسالة المؤشرات للمستخدم فقط إذا كانت مفعلة
                     if SEND_FRAMES_MESSAGES:
                         try:
                             send_frames_indicators_message(user_id, symbol, symbol_info, multi_tf_indicators)
@@ -11877,7 +12085,7 @@ def handle_single_symbol_analysis(call):
                         except Exception as frames_send_error:
                             logger.error(f"[FRAMES_MSG] فشل في إرسال رسالة مؤشرات الإطارات: {frames_send_error}")
                     else:
-                        logger.debug(f"[FRAMES_MSG] إرسال رسائل الإطارات معطل - البيانات متاحة للـ AI فقط")
+                        logger.debug(f"[FRAMES_MSG] المؤشرات محسوبة للـ AI ولكن لا تُرسل للمستخدم (معطلة) للرمز {symbol}")
                 else:
                     logger.warning(f"[WARNING] لا توجد مؤشرات متاحة في الخلفية للرمز {symbol}")
                     
@@ -14684,21 +14892,29 @@ def monitoring_loop():
                                 successful_operations += 1  # العملية نجحت لكن ليس الوقت المناسب
                                 continue
                             
-                            # إرسال التنبيه إذا كانت هناك إشارة قوية
-                            if analysis.get('confidence', 0) >= min_confidence:
+                            # إرسال التنبيه إذا كانت هناك نسبة نجاح عالية
+                            analysis_success_rate = analysis.get('success_rate', 0)
+                            
+                            logger.debug(f"[NOTIFICATION_CHECK] {symbol} للمستخدم {user_id}: نسبة النجاح={analysis_success_rate}%, العتبة={min_confidence}%")
+                            
+                            if analysis_success_rate >= min_confidence:
                                 signal = {
                                     'action': analysis.get('action', 'HOLD'),
-                                    'confidence': analysis.get('confidence', 0),
+                                    'success_rate': analysis_success_rate,  # نسبة النجاح الفعلية للصفقة
                                     'reasoning': analysis.get('reasoning', [])
                                 }
+                                
+                                logger.info(f"[SENDING_NOTIFICATION] إرسال تنبيه {symbol} للمستخدم {user_id}: {signal['action']} بنسبة نجاح {signal['success_rate']}%")
                                 
                                 try:
                                     send_trading_signal_alert(user_id, symbol, signal, analysis)
                                     successful_operations += 1
+                                    logger.info(f"[NOTIFICATION_SENT] تم إرسال تنبيه {symbol} للمستخدم {user_id} بنجاح")
                                 except Exception as alert_error:
                                     logger.error(f"[ERROR] خطأ في إرسال تنبيه {symbol} للمستخدم {user_id}: {alert_error}")
                                     failed_operations += 1
                             else:
+                                logger.debug(f"[NOTIFICATION_SKIPPED] {symbol} للمستخدم {user_id}: نسبة النجاح ({analysis_success_rate}%) أقل من العتبة ({min_confidence}%)")
                                 successful_operations += 1  # لا توجد إشارة قوية ولكن العملية نجحت
                                 
                         except Exception as user_error:
@@ -14818,6 +15034,21 @@ if __name__ == "__main__":
         price_data_cache.clear()
         last_api_calls.clear()
         logger.info("[SYSTEM] تم تنظيف جميع البيانات المؤقتة عند بدء التشغيل")
+        
+        # بدء البوت فعلياً
+        bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        
+    except Exception as e:
+        logger.error(f"[ERROR] خطأ عام في تشغيل البوت: {e}")
+        
+    finally:
+        # إغلاق اتصال MT5 عند الإنهاء بشكل آمن
+        monitoring_active = False
+        try:
+            mt5_manager.graceful_shutdown()
+        except Exception as e:
+            logger.error(f"[ERROR] خطأ في إغلاق MT5: {e}")
+        logger.info("[SYSTEM] تم إنهاء البوت بأمان")
 
 def format_multi_timeframe_indicators_for_ai(symbol: str, multi_tf_indicators: Dict) -> str:
     """تنسيق المؤشرات الفنية متعددة الإطارات للذكاء الاصطناعي - شامل ومفصل"""
@@ -15114,14 +15345,3 @@ def format_multi_timeframe_indicators_for_ai(symbol: str, multi_tf_indicators: D
         logger.info("[SYSTEM] تم الحصول على إشارة إيقاف...")
         monitoring_active = False
         logger.info("[SYSTEM] تم إيقاف حلقة المراقبة")
-    except Exception as e:
-        logger.error(f"[ERROR] خطأ عام في تشغيل البوت: {e}")
-        
-    finally:
-        # إغلاق اتصال MT5 عند الإنهاء بشكل آمن
-        monitoring_active = False
-        try:
-            mt5_manager.graceful_shutdown()
-        except Exception as e:
-            logger.error(f"[ERROR] خطأ في إغلاق MT5: {e}")
-        logger.info("[SYSTEM] تم إنهاء البوت بأمان")
